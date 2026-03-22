@@ -2,6 +2,3 @@
 /datasets/**
 !/datasets/.gitkeep
 
-# Ignore generated adversarial datasets
-/adv_dataset/**
-/adv_dataset_*/**
