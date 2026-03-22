@@ -26,6 +26,26 @@ The script follows the original project style and keeps `core` interfaces unchan
 If your environment uses CUDA-compatible APIs in PyTorch (common with many wrappers),
 use `--device-mode GPU --cuda-selected-devices 0`.
 
+## Dependencies
+
+This project depends on:
+
+- numpy
+- Pillow
+- opencv-python
+- tqdm
+- torch==2.2.0
+- torchvision==0.17.0
+
+Install with:
+
+```bash
+pip install -r requirements.txt
+```
+
+If you use a custom CUDA/MUSA build, install your platform-specific `torch` and `torchvision` first,
+then run the command above.
+
 ## Localized Modules
 
 This project now vendors the required `core` modules locally under:
