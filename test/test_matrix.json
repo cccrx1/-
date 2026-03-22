@@ -1,0 +1,43 @@
+{
+  "cases": {
+    "badnets_refine": {
+      "only_attack": "badnets",
+      "defense_variant": "refine",
+      "output_root": "./experiments/test/badnets_refine/runs",
+      "adv_dataset_root": "./experiments/test/badnets_refine/adv_dataset"
+    },
+    "blended_refine": {
+      "only_attack": "blended",
+      "defense_variant": "refine",
+      "output_root": "./experiments/test/blended_refine/runs",
+      "adv_dataset_root": "./experiments/test/blended_refine/adv_dataset"
+    },
+    "label_consistent_refine": {
+      "only_attack": "label_consistent",
+      "defense_variant": "refine",
+      "output_root": "./experiments/test/label_consistent_refine/runs",
+      "adv_dataset_root": "./experiments/test/label_consistent_refine/adv_dataset"
+    },
+    "badnets_refine_ssl_50": {
+      "only_attack": "badnets",
+      "defense_variant": "refine_ssl",
+      "refine_epochs": 50,
+      "output_root": "./experiments/test/badnets_refine_ssl_50/runs",
+      "adv_dataset_root": "./experiments/test/badnets_refine_ssl_50/adv_dataset"
+    },
+    "blended_refine_ssl_50": {
+      "only_attack": "blended",
+      "defense_variant": "refine_ssl",
+      "refine_epochs": 50,
+      "output_root": "./experiments/test/blended_refine_ssl_50/runs",
+      "adv_dataset_root": "./experiments/test/blended_refine_ssl_50/adv_dataset"
+    },
+    "label_consistent_refine_ssl_50": {
+      "only_attack": "label_consistent",
+      "defense_variant": "refine_ssl",
+      "refine_epochs": 50,
+      "output_root": "./experiments/test/label_consistent_refine_ssl_50/runs",
+      "adv_dataset_root": "./experiments/test/label_consistent_refine_ssl_50/adv_dataset"
+    }
+  }
+}

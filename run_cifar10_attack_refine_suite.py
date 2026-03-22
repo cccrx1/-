@@ -33,8 +33,8 @@ from core.attacks.base import accuracy as attack_accuracy
 @dataclass
 class RuntimeConfig:
     dataset_root: str = "./datasets"
-    output_root: str = "./projects/cifar10_attack_refine_suite/runs"
-    adv_dataset_root: str = "./projects/cifar10_attack_refine_suite/adv_dataset"
+    output_root: str = "./experiments/runs"
+    adv_dataset_root: str = "./experiments/adv_dataset"
     seed: int = 666
     deterministic: bool = True
     y_target: int = 0
@@ -58,6 +58,7 @@ class RuntimeConfig:
     cg_threshold: float = 0.35
     cg_temperature: float = 0.10
     cg_strength: float = 1.0
+    only_attack: str = "all"
 
 
 class _TeeStream:
@@ -703,8 +704,8 @@ def build_comparison_markdown(all_metrics: Dict[str, object]) -> str:
 def parse_args() -> RuntimeConfig:
     parser = argparse.ArgumentParser(description="CIFAR-10 BadNets/Blended/LC + REFINE unified experiments")
     parser.add_argument("--dataset-root", type=str, default="./datasets")
-    parser.add_argument("--output-root", type=str, default="./projects/cifar10_attack_refine_suite/runs")
-    parser.add_argument("--adv-dataset-root", type=str, default="./projects/cifar10_attack_refine_suite/adv_dataset")
+    parser.add_argument("--output-root", type=str, default="./experiments/runs")
+    parser.add_argument("--adv-dataset-root", type=str, default="./experiments/adv_dataset")
     parser.add_argument("--seed", type=int, default=666)
     parser.add_argument("--deterministic", action="store_true", default=True)
     parser.add_argument("--y-target", type=int, default=0)
@@ -734,6 +735,9 @@ def parse_args() -> RuntimeConfig:
                         help="Temperature for REFINE_CG gate sharpness")
     parser.add_argument("--cg-strength", type=float, default=1.0,
                         help="Gate strength multiplier for REFINE_CG")
+    parser.add_argument("--only-attack", type=str, default="all",
+                        choices=["all", "badnets", "blended", "label_consistent"],
+                        help="Only run the specified attack + corresponding REFINE stage")
 
     args = parser.parse_args()
 
@@ -764,11 +768,15 @@ def parse_args() -> RuntimeConfig:
         cg_threshold=args.cg_threshold,
         cg_temperature=args.cg_temperature,
         cg_strength=args.cg_strength,
+        only_attack=args.only_attack,
     )
 
 
 def main() -> None:
     cfg = parse_args()
+
+    if cfg.only_attack == "label_consistent" and cfg.skip_lc:
+        cfg.skip_lc = False
 
     os.environ["CUDA_VISIBLE_DEVICES"] = cfg.cuda_selected_devices
 
@@ -793,62 +801,85 @@ def main() -> None:
             "stages": {},
         }
 
-        stage_t0 = time.time()
-        benign_model = run_benign_training(cfg, trainset, testset, logger)
-        stage_elapsed_seconds["benign"] = time.time() - stage_t0
-        all_metrics["stages"]["benign"] = {
-            "model": "ResNet18",
-            "dataset": "CIFAR10",
-        }
+        run_badnets_flag = cfg.only_attack in ("all", "badnets")
+        run_blended_flag = cfg.only_attack in ("all", "blended")
+        run_lc_flag = cfg.only_attack in ("all", "label_consistent") and (not cfg.skip_lc)
 
-        stage_t0 = time.time()
-        badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
-        stage_elapsed_seconds["badnets"] = time.time() - stage_t0
-        all_metrics["stages"]["badnets"] = badnets_metrics
+        benign_model = None
+        if run_lc_flag:
+            stage_t0 = time.time()
+            benign_model = run_benign_training(cfg, trainset, testset, logger)
+            stage_elapsed_seconds["benign"] = time.time() - stage_t0
+            all_metrics["stages"]["benign"] = {
+                "model": "ResNet18",
+                "dataset": "CIFAR10",
+            }
+        else:
+            logger.log("Stage[Benign]: skipped (only required for LabelConsistent pipeline).")
 
-        stage_t0 = time.time()
-        blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
-        stage_elapsed_seconds["blended"] = time.time() - stage_t0
-        all_metrics["stages"]["blended"] = blended_metrics
+        badnets_attack = None
+        if run_badnets_flag:
+            stage_t0 = time.time()
+            badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
+            stage_elapsed_seconds["badnets"] = time.time() - stage_t0
+            all_metrics["stages"]["badnets"] = badnets_metrics
+        else:
+            logger.log("Stage[BadNets]: skipped by --only-attack.")
+
+        blended_attack = None
+        if run_blended_flag:
+            stage_t0 = time.time()
+            blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
+            stage_elapsed_seconds["blended"] = time.time() - stage_t0
+            all_metrics["stages"]["blended"] = blended_metrics
+        else:
+            logger.log("Stage[Blended]: skipped by --only-attack.")
 
         lc_attack = None
-        if cfg.skip_lc:
-            logger.log("Stage[LabelConsistent]: skipped by --skip-lc.")
-        else:
+        if run_lc_flag:
             stage_t0 = time.time()
             lc_attack, lc_metrics = run_label_consistent(cfg, trainset, testset, benign_model, logger)
             stage_elapsed_seconds["label_consistent"] = time.time() - stage_t0
             all_metrics["stages"]["label_consistent"] = lc_metrics
-
-        stage_t0 = time.time()
-        refine_badnets = run_refine_for_attack(
-            cfg,
-            "BadNets",
-            badnets_attack.get_model(),
-            trainset,
-            testset,
-            badnets_attack.poisoned_test_dataset,
-            logger,
-        )
-        stage_elapsed_seconds["refine_badnets"] = time.time() - stage_t0
-        all_metrics["stages"]["refine_badnets"] = refine_badnets
-
-        stage_t0 = time.time()
-        refine_blended = run_refine_for_attack(
-            cfg,
-            "Blended",
-            blended_attack.get_model(),
-            trainset,
-            testset,
-            blended_attack.poisoned_test_dataset,
-            logger,
-        )
-        stage_elapsed_seconds["refine_blended"] = time.time() - stage_t0
-        all_metrics["stages"]["refine_blended"] = refine_blended
-
-        if cfg.skip_lc:
-            logger.log("Stage[REFINE/LabelConsistent]: skipped because LabelConsistent is skipped.")
         else:
+            if cfg.skip_lc:
+                logger.log("Stage[LabelConsistent]: skipped by --skip-lc.")
+            else:
+                logger.log("Stage[LabelConsistent]: skipped by --only-attack.")
+
+        if badnets_attack is not None:
+            stage_t0 = time.time()
+            refine_badnets = run_refine_for_attack(
+                cfg,
+                "BadNets",
+                badnets_attack.get_model(),
+                trainset,
+                testset,
+                badnets_attack.poisoned_test_dataset,
+                logger,
+            )
+            stage_elapsed_seconds["refine_badnets"] = time.time() - stage_t0
+            all_metrics["stages"]["refine_badnets"] = refine_badnets
+        else:
+            logger.log("Stage[REFINE/BadNets]: skipped.")
+
+        if blended_attack is not None:
+            stage_t0 = time.time()
+            refine_blended = run_refine_for_attack(
+                cfg,
+                "Blended",
+                blended_attack.get_model(),
+                trainset,
+                testset,
+                blended_attack.poisoned_test_dataset,
+                logger,
+            )
+            stage_elapsed_seconds["refine_blended"] = time.time() - stage_t0
+            all_metrics["stages"]["refine_blended"] = refine_blended
+        else:
+            logger.log("Stage[REFINE/Blended]: skipped.")
+
+        if lc_attack is not None:
             stage_t0 = time.time()
             refine_lc = run_refine_for_attack(
                 cfg,
@@ -861,6 +892,8 @@ def main() -> None:
             )
             stage_elapsed_seconds["refine_label_consistent"] = time.time() - stage_t0
             all_metrics["stages"]["refine_label_consistent"] = refine_lc
+        else:
+            logger.log("Stage[REFINE/LabelConsistent]: skipped.")
 
         total_elapsed = time.time() - pipeline_start
         all_metrics["timing"] = {
