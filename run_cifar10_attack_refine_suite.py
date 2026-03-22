@@ -30,6 +30,54 @@ import core
 from core.attacks.base import accuracy as attack_accuracy
 
 
+class StageStatusManager:
+    """Track and manage pipeline stage completion for resumable runs."""
+    
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = Path(output_dir)
+        self.status_file = self.output_dir / "stage_status.json"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._load()
+    
+    def _load(self) -> None:
+        if self.status_file.exists():
+            try:
+                with self.status_file.open("r", encoding="utf-8") as f:
+                    self.status = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                self.status = {}
+        else:
+            self.status = {}
+    
+    def _save(self) -> None:
+        with self.status_file.open("w", encoding="utf-8") as f:
+            json.dump(self.status, f, indent=2)
+    
+    def is_completed(self, stage_name: str, force_rebuild: bool = False) -> bool:
+        if force_rebuild:
+            return False
+        return self.status.get(stage_name) == "completed"
+    
+    def mark_completed(self, stage_name: str, metadata: Optional[dict] = None) -> None:
+        self.status[stage_name] = "completed"
+        if metadata:
+            self.status[f"{stage_name}_meta"] = metadata
+        self._save()
+    
+    def mark_failed(self, stage_name: str, error_msg: str = "") -> None:
+        self.status[stage_name] = "failed"
+        if error_msg:
+            self.status[f"{stage_name}_error"] = error_msg
+        self._save()
+    
+    def get_status(self, stage_name: str) -> str:
+        return self.status.get(stage_name, "not-started")
+    
+    def reset(self) -> None:
+        self.status = {}
+        self._save()
+
+
 @dataclass
 class RuntimeConfig:
     dataset_root: str = "./datasets"
@@ -59,6 +107,7 @@ class RuntimeConfig:
     cg_temperature: float = 0.10
     cg_strength: float = 1.0
     only_attack: str = "all"
+    force_rebuild: bool = False
 
 
 class _TeeStream:
@@ -653,6 +702,54 @@ def format_duration(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def get_cache_dir(output_dir: Path) -> Path:
+    """Get the cache directory for storing intermediate results."""
+    cache_dir = output_dir / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def save_model_cache(model: nn.Module, name: str, output_dir: Path) -> None:
+    """Save model to cache."""
+    cache_dir = get_cache_dir(output_dir)
+    cache_path = cache_dir / f"{name}_model.pth"
+    torch.save(model.state_dict(), cache_path)
+
+
+def load_model_cache(model: nn.Module, name: str, output_dir: Path) -> Optional[nn.Module]:
+    """Load model from cache, return None if not found."""
+    cache_dir = get_cache_dir(output_dir)
+    cache_path = cache_dir / f"{name}_model.pth"
+    if not cache_path.exists():
+        return None
+    try:
+        model.load_state_dict(torch.load(cache_path, map_location='cpu'))
+        return model
+    except Exception:
+        return None
+
+
+def save_refine_cache(results: Dict, name: str, output_dir: Path) -> None:
+    """Save REFINE results to cache."""
+    cache_dir = get_cache_dir(output_dir)
+    cache_path = cache_dir / f"{name}_refine_results.json"
+    with cache_path.open("w", encoding="utf-8") as f:
+        json.dump(to_builtin(results), f, indent=2)
+
+
+def load_refine_cache(name: str, output_dir: Path) -> Optional[Dict]:
+    """Load REFINE results from cache, return None if not found."""
+    cache_dir = get_cache_dir(output_dir)
+    cache_path = cache_dir / f"{name}_refine_results.json"
+    if not cache_path.exists():
+        return None
+    try:
+        with cache_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def build_comparison_markdown(all_metrics: Dict[str, object]) -> str:
     stages = all_metrics.get("stages", {}) if isinstance(all_metrics, dict) else {}
     timing = all_metrics.get("timing", {}) if isinstance(all_metrics, dict) else {}
@@ -738,6 +835,8 @@ def parse_args() -> RuntimeConfig:
     parser.add_argument("--only-attack", type=str, default="all",
                         choices=["all", "badnets", "blended", "label_consistent"],
                         help="Only run the specified attack + corresponding REFINE stage")
+    parser.add_argument("--force-rebuild", action="store_true", default=False,
+                        help="Force rebuild all stages, ignore cached results")
 
     args = parser.parse_args()
 
@@ -769,6 +868,7 @@ def parse_args() -> RuntimeConfig:
         cg_temperature=args.cg_temperature,
         cg_strength=args.cg_strength,
         only_attack=args.only_attack,
+        force_rebuild=args.force_rebuild,
     )
 
 
@@ -784,6 +884,7 @@ def main() -> None:
     run_lock = PipelineRunLock(output_dir)
     run_lock.acquire()
     logger = StageLogger(output_dir)
+    stage_status = StageStatusManager(output_dir)
     pipeline_start = time.time()
     stage_elapsed_seconds: Dict[str, float] = {}
 
@@ -807,9 +908,26 @@ def main() -> None:
 
         benign_model = None
         if run_lc_flag:
-            stage_t0 = time.time()
-            benign_model = run_benign_training(cfg, trainset, testset, logger)
-            stage_elapsed_seconds["benign"] = time.time() - stage_t0
+            if stage_status.is_completed("benign", cfg.force_rebuild):
+                logger.log("Stage[Benign]: loading from cache.")
+                benign_model = load_model_cache(build_cifar10_model(), "benign", output_dir)
+                if benign_model is None:
+                    logger.log("Stage[Benign]: cache load failed, rebuilding.")
+                    stage_status.mark_failed("benign", "cache load failed")
+                    stage_t0 = time.time()
+                    benign_model = run_benign_training(cfg, trainset, testset, logger)
+                    save_model_cache(benign_model, "benign", output_dir)
+                    stage_elapsed_seconds["benign"] = time.time() - stage_t0
+                    stage_status.mark_completed("benign")
+                else:
+                    logger.log("Stage[Benign]: loaded from cache successfully.")
+                    stage_elapsed_seconds["benign"] = 0.0
+            else:
+                stage_t0 = time.time()
+                benign_model = run_benign_training(cfg, trainset, testset, logger)
+                save_model_cache(benign_model, "benign", output_dir)
+                stage_elapsed_seconds["benign"] = time.time() - stage_t0
+                stage_status.mark_completed("benign")
             all_metrics["stages"]["benign"] = {
                 "model": "ResNet18",
                 "dataset": "CIFAR10",
@@ -819,27 +937,136 @@ def main() -> None:
 
         badnets_attack = None
         if run_badnets_flag:
-            stage_t0 = time.time()
-            badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
-            stage_elapsed_seconds["badnets"] = time.time() - stage_t0
+            if stage_status.is_completed("badnets", cfg.force_rebuild):
+                logger.log("Stage[BadNets]: loading from cache.")
+                badnets_attack = core.BadNets(
+                    train_dataset=trainset,
+                    test_dataset=testset,
+                    model=build_cifar10_model(),
+                    loss=nn.CrossEntropyLoss(),
+                    y_target=cfg.y_target,
+                    poisoned_rate=cfg.attack_poisoned_rate_badnets,
+                    pattern=None,
+                    weight=None,
+                    seed=cfg.seed,
+                    deterministic=cfg.deterministic,
+                )
+                cached_model = load_model_cache(build_cifar10_model(), "badnets", output_dir)
+                if cached_model is not None:
+                    badnets_attack.model = cached_model
+                    badnets_metrics = stage_status.status.get("badnets_meta", {})
+                    logger.log("Stage[BadNets]: loaded from cache successfully.")
+                    stage_elapsed_seconds["badnets"] = 0.0
+                else:
+                    logger.log("Stage[BadNets]: cache load failed, rebuilding.")
+                    stage_status.mark_failed("badnets", "cache load failed")
+                    stage_t0 = time.time()
+                    badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
+                    save_model_cache(badnets_attack.get_model(), "badnets", output_dir)
+                    stage_elapsed_seconds["badnets"] = time.time() - stage_t0
+                    stage_status.mark_completed("badnets", badnets_metrics)
+            else:
+                stage_t0 = time.time()
+                badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
+                save_model_cache(badnets_attack.get_model(), "badnets", output_dir)
+                stage_elapsed_seconds["badnets"] = time.time() - stage_t0
+                stage_status.mark_completed("badnets", badnets_metrics)
             all_metrics["stages"]["badnets"] = badnets_metrics
         else:
             logger.log("Stage[BadNets]: skipped by --only-attack.")
 
         blended_attack = None
         if run_blended_flag:
-            stage_t0 = time.time()
-            blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
-            stage_elapsed_seconds["blended"] = time.time() - stage_t0
+            if stage_status.is_completed("blended", cfg.force_rebuild):
+                logger.log("Stage[Blended]: loading from cache.")
+                blended_attack = core.Blended(
+                    train_dataset=trainset,
+                    test_dataset=testset,
+                    model=build_cifar10_model(),
+                    loss=nn.CrossEntropyLoss(),
+                    y_target=cfg.y_target,
+                    poisoned_rate=cfg.attack_poisoned_rate_blended,
+                    pattern=None,
+                    weight=None,
+                    seed=cfg.seed,
+                    deterministic=cfg.deterministic,
+                )
+                cached_model = load_model_cache(build_cifar10_model(), "blended", output_dir)
+                if cached_model is not None:
+                    blended_attack.model = cached_model
+                    blended_metrics = stage_status.status.get("blended_meta", {})
+                    logger.log("Stage[Blended]: loaded from cache successfully.")
+                    stage_elapsed_seconds["blended"] = 0.0
+                else:
+                    logger.log("Stage[Blended]: cache load failed, rebuilding.")
+                    stage_status.mark_failed("blended", "cache load failed")
+                    stage_t0 = time.time()
+                    blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
+                    save_model_cache(blended_attack.get_model(), "blended", output_dir)
+                    stage_elapsed_seconds["blended"] = time.time() - stage_t0
+                    stage_status.mark_completed("blended", blended_metrics)
+            else:
+                stage_t0 = time.time()
+                blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
+                save_model_cache(blended_attack.get_model(), "blended", output_dir)
+                stage_elapsed_seconds["blended"] = time.time() - stage_t0
+                stage_status.mark_completed("blended", blended_metrics)
             all_metrics["stages"]["blended"] = blended_metrics
         else:
             logger.log("Stage[Blended]: skipped by --only-attack.")
 
         lc_attack = None
         if run_lc_flag:
-            stage_t0 = time.time()
-            lc_attack, lc_metrics = run_label_consistent(cfg, trainset, testset, benign_model, logger)
-            stage_elapsed_seconds["label_consistent"] = time.time() - stage_t0
+            if stage_status.is_completed("label_consistent", cfg.force_rebuild):
+                logger.log("Stage[LabelConsistent]: loading from cache.")
+                pattern, weight = make_lc_trigger()
+                adv_dir = Path(cfg.adv_dataset_root) / (
+                    f"CIFAR10_eps{cfg.lc_eps}_alpha{cfg.lc_alpha}_steps{cfg.lc_steps}_"
+                    f"poisoned_rate{cfg.attack_poisoned_rate_lc}_seed{cfg.seed}"
+                )
+                lc_attack = core.LabelConsistent(
+                    train_dataset=trainset,
+                    test_dataset=testset,
+                    model=build_cifar10_model(),
+                    adv_model=copy.deepcopy(benign_model),
+                    adv_dataset_dir=str(adv_dir),
+                    loss=nn.CrossEntropyLoss(),
+                    y_target=cfg.y_target,
+                    poisoned_rate=cfg.attack_poisoned_rate_lc,
+                    adv_transform=Compose([ToTensor()]),
+                    pattern=pattern,
+                    weight=weight,
+                    eps=cfg.lc_eps,
+                    alpha=cfg.lc_alpha,
+                    steps=cfg.lc_steps,
+                    max_pixel=255,
+                    poisoned_transform_train_index=0,
+                    poisoned_transform_test_index=0,
+                    poisoned_target_transform_index=0,
+                    schedule=make_attack_schedule(cfg, "CIFAR10_ResNet18_LabelConsistent", benign_training=False, epochs=cfg.lc_epochs),
+                    seed=cfg.seed,
+                    deterministic=cfg.deterministic,
+                )
+                cached_model = load_model_cache(build_cifar10_model(), "label_consistent", output_dir)
+                if cached_model is not None:
+                    lc_attack.model = cached_model
+                    lc_metrics = stage_status.status.get("label_consistent_meta", {})
+                    logger.log("Stage[LabelConsistent]: loaded from cache successfully.")
+                    stage_elapsed_seconds["label_consistent"] = 0.0
+                else:
+                    logger.log("Stage[LabelConsistent]: cache load failed, rebuilding.")
+                    stage_status.mark_failed("label_consistent", "cache load failed")
+                    stage_t0 = time.time()
+                    lc_attack, lc_metrics = run_label_consistent(cfg, trainset, testset, benign_model, logger)
+                    save_model_cache(lc_attack.get_model(), "label_consistent", output_dir)
+                    stage_elapsed_seconds["label_consistent"] = time.time() - stage_t0
+                    stage_status.mark_completed("label_consistent", lc_metrics)
+            else:
+                stage_t0 = time.time()
+                lc_attack, lc_metrics = run_label_consistent(cfg, trainset, testset, benign_model, logger)
+                save_model_cache(lc_attack.get_model(), "label_consistent", output_dir)
+                stage_elapsed_seconds["label_consistent"] = time.time() - stage_t0
+                stage_status.mark_completed("label_consistent", lc_metrics)
             all_metrics["stages"]["label_consistent"] = lc_metrics
         else:
             if cfg.skip_lc:
@@ -848,50 +1075,131 @@ def main() -> None:
                 logger.log("Stage[LabelConsistent]: skipped by --only-attack.")
 
         if badnets_attack is not None:
-            stage_t0 = time.time()
-            refine_badnets = run_refine_for_attack(
-                cfg,
-                "BadNets",
-                badnets_attack.get_model(),
-                trainset,
-                testset,
-                badnets_attack.poisoned_test_dataset,
-                logger,
-            )
-            stage_elapsed_seconds["refine_badnets"] = time.time() - stage_t0
-            all_metrics["stages"]["refine_badnets"] = refine_badnets
+            if stage_status.is_completed("refine_badnets", cfg.force_rebuild):
+                logger.log("Stage[REFINE/BadNets]: loading from cache.")
+                refine_badnets = load_refine_cache("badnets", output_dir)
+                if refine_badnets is not None:
+                    logger.log("Stage[REFINE/BadNets]: loaded from cache successfully.")
+                    stage_elapsed_seconds["refine_badnets"] = 0.0
+                    all_metrics["stages"]["refine_badnets"] = refine_badnets
+                else:
+                    logger.log("Stage[REFINE/BadNets]: cache load failed, rebuilding.")
+                    stage_status.mark_failed("refine_badnets", "cache load failed")
+                    stage_t0 = time.time()
+                    refine_badnets = run_refine_for_attack(
+                        cfg,
+                        "BadNets",
+                        badnets_attack.get_model(),
+                        trainset,
+                        testset,
+                        badnets_attack.poisoned_test_dataset,
+                        logger,
+                    )
+                    save_refine_cache(refine_badnets, "badnets", output_dir)
+                    stage_elapsed_seconds["refine_badnets"] = time.time() - stage_t0
+                    stage_status.mark_completed("refine_badnets")
+                    all_metrics["stages"]["refine_badnets"] = refine_badnets
+            else:
+                stage_t0 = time.time()
+                refine_badnets = run_refine_for_attack(
+                    cfg,
+                    "BadNets",
+                    badnets_attack.get_model(),
+                    trainset,
+                    testset,
+                    badnets_attack.poisoned_test_dataset,
+                    logger,
+                )
+                save_refine_cache(refine_badnets, "badnets", output_dir)
+                stage_elapsed_seconds["refine_badnets"] = time.time() - stage_t0
+                stage_status.mark_completed("refine_badnets")
+                all_metrics["stages"]["refine_badnets"] = refine_badnets
         else:
             logger.log("Stage[REFINE/BadNets]: skipped.")
 
         if blended_attack is not None:
-            stage_t0 = time.time()
-            refine_blended = run_refine_for_attack(
-                cfg,
-                "Blended",
-                blended_attack.get_model(),
-                trainset,
-                testset,
-                blended_attack.poisoned_test_dataset,
-                logger,
-            )
-            stage_elapsed_seconds["refine_blended"] = time.time() - stage_t0
-            all_metrics["stages"]["refine_blended"] = refine_blended
+            if stage_status.is_completed("refine_blended", cfg.force_rebuild):
+                logger.log("Stage[REFINE/Blended]: loading from cache.")
+                refine_blended = load_refine_cache("blended", output_dir)
+                if refine_blended is not None:
+                    logger.log("Stage[REFINE/Blended]: loaded from cache successfully.")
+                    stage_elapsed_seconds["refine_blended"] = 0.0
+                    all_metrics["stages"]["refine_blended"] = refine_blended
+                else:
+                    logger.log("Stage[REFINE/Blended]: cache load failed, rebuilding.")
+                    stage_status.mark_failed("refine_blended", "cache load failed")
+                    stage_t0 = time.time()
+                    refine_blended = run_refine_for_attack(
+                        cfg,
+                        "Blended",
+                        blended_attack.get_model(),
+                        trainset,
+                        testset,
+                        blended_attack.poisoned_test_dataset,
+                        logger,
+                    )
+                    save_refine_cache(refine_blended, "blended", output_dir)
+                    stage_elapsed_seconds["refine_blended"] = time.time() - stage_t0
+                    stage_status.mark_completed("refine_blended")
+                    all_metrics["stages"]["refine_blended"] = refine_blended
+            else:
+                stage_t0 = time.time()
+                refine_blended = run_refine_for_attack(
+                    cfg,
+                    "Blended",
+                    blended_attack.get_model(),
+                    trainset,
+                    testset,
+                    blended_attack.poisoned_test_dataset,
+                    logger,
+                )
+                save_refine_cache(refine_blended, "blended", output_dir)
+                stage_elapsed_seconds["refine_blended"] = time.time() - stage_t0
+                stage_status.mark_completed("refine_blended")
+                all_metrics["stages"]["refine_blended"] = refine_blended
         else:
             logger.log("Stage[REFINE/Blended]: skipped.")
 
         if lc_attack is not None:
-            stage_t0 = time.time()
-            refine_lc = run_refine_for_attack(
-                cfg,
-                "LabelConsistent",
-                lc_attack.get_model(),
-                trainset,
-                testset,
-                lc_attack.poisoned_test_dataset,
-                logger,
-            )
-            stage_elapsed_seconds["refine_label_consistent"] = time.time() - stage_t0
-            all_metrics["stages"]["refine_label_consistent"] = refine_lc
+            if stage_status.is_completed("refine_label_consistent", cfg.force_rebuild):
+                logger.log("Stage[REFINE/LabelConsistent]: loading from cache.")
+                refine_lc = load_refine_cache("label_consistent", output_dir)
+                if refine_lc is not None:
+                    logger.log("Stage[REFINE/LabelConsistent]: loaded from cache successfully.")
+                    stage_elapsed_seconds["refine_label_consistent"] = 0.0
+                    all_metrics["stages"]["refine_label_consistent"] = refine_lc
+                else:
+                    logger.log("Stage[REFINE/LabelConsistent]: cache load failed, rebuilding.")
+                    stage_status.mark_failed("refine_label_consistent", "cache load failed")
+                    stage_t0 = time.time()
+                    refine_lc = run_refine_for_attack(
+                        cfg,
+                        "LabelConsistent",
+                        lc_attack.get_model(),
+                        trainset,
+                        testset,
+                        lc_attack.poisoned_test_dataset,
+                        logger,
+                    )
+                    save_refine_cache(refine_lc, "label_consistent", output_dir)
+                    stage_elapsed_seconds["refine_label_consistent"] = time.time() - stage_t0
+                    stage_status.mark_completed("refine_label_consistent")
+                    all_metrics["stages"]["refine_label_consistent"] = refine_lc
+            else:
+                stage_t0 = time.time()
+                refine_lc = run_refine_for_attack(
+                    cfg,
+                    "LabelConsistent",
+                    lc_attack.get_model(),
+                    trainset,
+                    testset,
+                    lc_attack.poisoned_test_dataset,
+                    logger,
+                )
+                save_refine_cache(refine_lc, "label_consistent", output_dir)
+                stage_elapsed_seconds["refine_label_consistent"] = time.time() - stage_t0
+                stage_status.mark_completed("refine_label_consistent")
+                all_metrics["stages"]["refine_label_consistent"] = refine_lc
         else:
             logger.log("Stage[REFINE/LabelConsistent]: skipped.")
 
