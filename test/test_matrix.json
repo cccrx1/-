@@ -1,4 +1,17 @@
 {
+  "defaults": {
+    "dataset_root": "./datasets",
+    "seed": 666,
+    "deterministic": true,
+    "device_mode": "GPU",
+    "cuda_selected_devices": "0",
+    "batch_size": 128,
+    "num_workers": 8,
+    "benign_epochs": 200,
+    "attack_epochs": 200,
+    "lc_epochs": 200,
+    "attack_cache_root": "./experiments/test/shared_attack_cache"
+  },
   "cases": {
     "badnets_refine": {
       "only_attack": "badnets",

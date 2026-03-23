@@ -1,16 +1,16 @@
 {
-  "started_at": "2026-03-22 20:39:24",
-  "matrix": "C:\\Users\\17672\\Documents\\Project\\-\\test\\test_matrix.json",
+  "started_at": "2026-03-23 08:06:26",
+  "matrix": "/root/-/test/test_matrix.json",
   "cases": [
-    "badnets_refine"
+    "badnets_refine_ssl_50"
   ],
   "total_cases": 1,
   "results": [
     {
-      "case": "badnets_refine",
+      "case": "badnets_refine_ssl_50",
       "status": "ok",
       "exit_code": 0,
-      "elapsed_seconds": 0.08967924118041992,
+      "elapsed_seconds": 0.311739444732666,
       "metrics": {}
     }
   ],

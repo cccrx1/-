@@ -25,7 +25,13 @@ def load_case(matrix_path: Path, case_name: str):
     cases = matrix.get("cases", {})
     if case_name not in cases:
         raise KeyError(f"Case '{case_name}' not found in {matrix_path}.")
-    return cases[case_name]
+    defaults = matrix.get("defaults", {})
+    if not isinstance(defaults, dict):
+        defaults = {}
+
+    case_cfg = dict(defaults)
+    case_cfg.update(cases[case_name])
+    return case_cfg
 
 
 def to_cli_args(case_cfg):
@@ -33,14 +39,36 @@ def to_cli_args(case_cfg):
     mapping = {
         "only_attack": "--only-attack",
         "defense_variant": "--defense-variant",
+        "seed": "--seed",
+        "deterministic": "--deterministic",
+        "device_mode": "--device-mode",
+        "cuda_selected_devices": "--cuda-selected-devices",
+        "batch_size": "--batch-size",
+        "num_workers": "--num-workers",
+        "benign_epochs": "--benign-epochs",
+        "attack_epochs": "--attack-epochs",
+        "lc_epochs": "--lc-epochs",
         "refine_epochs": "--refine-epochs",
+        "badnets_rate": "--badnets-rate",
+        "blended_rate": "--blended-rate",
+        "lc_rate": "--lc-rate",
+        "lc_eps": "--lc-eps",
+        "lc_alpha": "--lc-alpha",
+        "lc_steps": "--lc-steps",
+        "refine_first_channels": "--refine-first-channels",
+        "attack_cache_root": "--attack-cache-root",
         "output_root": "--output-root",
         "adv_dataset_root": "--adv-dataset-root",
         "dataset_root": "--dataset-root",
     }
     for key, flag in mapping.items():
         if key in case_cfg:
-            args.extend([flag, str(case_cfg[key])])
+            val = case_cfg[key]
+            if isinstance(val, bool):
+                if val:
+                    args.append(flag)
+                continue
+            args.extend([flag, str(val)])
 
     extra = case_cfg.get("extra_args", [])
     if isinstance(extra, list):

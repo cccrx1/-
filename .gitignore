@@ -2,3 +2,14 @@
 /datasets/**
 !/datasets/.gitkeep
 
+/experiments/**
+!/experiments/.gitkeep
+
+# Ignore Python/runtime caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Ignore local cache directories
+.cache/

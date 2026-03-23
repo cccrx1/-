@@ -10,6 +10,7 @@ This script only prepares the full workflow. It does not auto-run unless invoked
 import argparse
 import atexit
 import copy
+import hashlib
 import json
 import os
 import random
@@ -107,6 +108,7 @@ class RuntimeConfig:
     cg_temperature: float = 0.10
     cg_strength: float = 1.0
     only_attack: str = "all"
+    attack_cache_root: str = ""
     force_rebuild: bool = False
 
 
@@ -709,17 +711,73 @@ def get_cache_dir(output_dir: Path) -> Path:
     return cache_dir
 
 
-def save_model_cache(model: nn.Module, name: str, output_dir: Path) -> None:
+def make_attack_cache_key(attack_name: str, cfg: RuntimeConfig) -> str:
+    payload = {
+        "attack": attack_name,
+        "seed": cfg.seed,
+        "deterministic": cfg.deterministic,
+        "y_target": cfg.y_target,
+        "attack_epochs": cfg.attack_epochs,
+        "lc_epochs": cfg.lc_epochs,
+        "batch_size": cfg.batch_size,
+        "num_workers": cfg.num_workers,
+        "badnets_rate": cfg.attack_poisoned_rate_badnets,
+        "blended_rate": cfg.attack_poisoned_rate_blended,
+        "lc_rate": cfg.attack_poisoned_rate_lc,
+        "lc_eps": cfg.lc_eps,
+        "lc_alpha": cfg.lc_alpha,
+        "lc_steps": cfg.lc_steps,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()[:12]
+
+
+def build_run_signature(cfg: RuntimeConfig) -> Dict[str, object]:
+    return {
+        "seed": cfg.seed,
+        "deterministic": cfg.deterministic,
+        "y_target": cfg.y_target,
+        "batch_size": cfg.batch_size,
+        "num_workers": cfg.num_workers,
+        "benign_epochs": cfg.benign_epochs,
+        "attack_epochs": cfg.attack_epochs,
+        "lc_epochs": cfg.lc_epochs,
+        "refine_epochs": cfg.refine_epochs,
+        "defense_variant": cfg.defense_variant,
+        "badnets_rate": cfg.attack_poisoned_rate_badnets,
+        "blended_rate": cfg.attack_poisoned_rate_blended,
+        "lc_rate": cfg.attack_poisoned_rate_lc,
+        "lc_eps": cfg.lc_eps,
+        "lc_alpha": cfg.lc_alpha,
+        "lc_steps": cfg.lc_steps,
+        "refine_first_channels": cfg.refine_first_channels,
+        "cg_threshold": cfg.cg_threshold,
+        "cg_temperature": cfg.cg_temperature,
+        "cg_strength": cfg.cg_strength,
+        "only_attack": cfg.only_attack,
+        "skip_lc": cfg.skip_lc,
+    }
+
+
+def resolve_attack_cache_root(cfg: RuntimeConfig, output_dir: Path) -> Path:
+    if cfg.attack_cache_root:
+        return Path(cfg.attack_cache_root)
+    return output_dir
+
+
+def save_model_cache(model: nn.Module, name: str, output_dir: Path, cache_key: str = "") -> None:
     """Save model to cache."""
     cache_dir = get_cache_dir(output_dir)
-    cache_path = cache_dir / f"{name}_model.pth"
+    suffix = f"_{cache_key}" if cache_key else ""
+    cache_path = cache_dir / f"{name}{suffix}_model.pth"
     torch.save(model.state_dict(), cache_path)
 
 
-def load_model_cache(model: nn.Module, name: str, output_dir: Path) -> Optional[nn.Module]:
+def load_model_cache(model: nn.Module, name: str, output_dir: Path, cache_key: str = "") -> Optional[nn.Module]:
     """Load model from cache, return None if not found."""
     cache_dir = get_cache_dir(output_dir)
-    cache_path = cache_dir / f"{name}_model.pth"
+    suffix = f"_{cache_key}" if cache_key else ""
+    cache_path = cache_dir / f"{name}{suffix}_model.pth"
     if not cache_path.exists():
         return None
     try:
@@ -835,6 +893,8 @@ def parse_args() -> RuntimeConfig:
     parser.add_argument("--only-attack", type=str, default="all",
                         choices=["all", "badnets", "blended", "label_consistent"],
                         help="Only run the specified attack + corresponding REFINE stage")
+    parser.add_argument("--attack-cache-root", type=str, default="",
+                        help="Optional shared cache root for attack-stage models to enable cross-case reuse")
     parser.add_argument("--force-rebuild", action="store_true", default=False,
                         help="Force rebuild all stages, ignore cached results")
 
@@ -868,6 +928,7 @@ def parse_args() -> RuntimeConfig:
         cg_temperature=args.cg_temperature,
         cg_strength=args.cg_strength,
         only_attack=args.only_attack,
+        attack_cache_root=args.attack_cache_root,
         force_rebuild=args.force_rebuild,
     )
 
@@ -881,6 +942,8 @@ def main() -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = cfg.cuda_selected_devices
 
     output_dir = Path(cfg.output_root)
+    attack_cache_root = resolve_attack_cache_root(cfg, output_dir)
+    attack_cache_root.mkdir(parents=True, exist_ok=True)
     run_lock = PipelineRunLock(output_dir)
     run_lock.acquire()
     logger = StageLogger(output_dir)
@@ -892,6 +955,14 @@ def main() -> None:
         logger.log("Pipeline init: CIFAR-10 benign + BadNets/Blended/LabelConsistent + REFINE.")
         logger.log(f"Run metadata: pid={os.getpid()}, cwd={os.getcwd()}, command={' '.join(sys.argv)}")
         logger.log(f"Runtime config: {asdict(cfg)}")
+
+        run_signature = build_run_signature(cfg)
+        previous_signature = stage_status.status.get("_run_signature")
+        if previous_signature is not None and previous_signature != run_signature and not cfg.force_rebuild:
+            logger.log("Run signature changed since previous run. Resetting stage status to avoid stale-cache comparability drift.")
+            stage_status.reset()
+        stage_status.status["_run_signature"] = run_signature
+        stage_status._save()
 
         set_global_seed(cfg.seed, cfg.deterministic)
 
@@ -937,8 +1008,10 @@ def main() -> None:
 
         badnets_attack = None
         if run_badnets_flag:
+            badnets_cache_key = make_attack_cache_key("badnets", cfg)
             if stage_status.is_completed("badnets", cfg.force_rebuild):
                 logger.log("Stage[BadNets]: loading from cache.")
+                pattern, weight = make_badnets_trigger()
                 badnets_attack = core.BadNets(
                     train_dataset=trainset,
                     test_dataset=testset,
@@ -946,15 +1019,20 @@ def main() -> None:
                     loss=nn.CrossEntropyLoss(),
                     y_target=cfg.y_target,
                     poisoned_rate=cfg.attack_poisoned_rate_badnets,
-                    pattern=None,
-                    weight=None,
+                    pattern=pattern,
+                    weight=weight,
                     seed=cfg.seed,
                     deterministic=cfg.deterministic,
                 )
-                cached_model = load_model_cache(build_cifar10_model(), "badnets", output_dir)
+                cached_model = load_model_cache(build_cifar10_model(), "badnets", attack_cache_root, badnets_cache_key)
                 if cached_model is not None:
                     badnets_attack.model = cached_model
-                    badnets_metrics = stage_status.status.get("badnets_meta", {})
+                    eval_device = pick_eval_device(cfg)
+                    badnets_metrics = {
+                        "attack": "BadNets",
+                        "clean": evaluate_attack_base(badnets_attack, badnets_attack.test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "poisoned": evaluate_attack_base(badnets_attack, badnets_attack.poisoned_test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                    }
                     logger.log("Stage[BadNets]: loaded from cache successfully.")
                     stage_elapsed_seconds["badnets"] = 0.0
                 else:
@@ -962,23 +1040,54 @@ def main() -> None:
                     stage_status.mark_failed("badnets", "cache load failed")
                     stage_t0 = time.time()
                     badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
-                    save_model_cache(badnets_attack.get_model(), "badnets", output_dir)
+                    save_model_cache(badnets_attack.get_model(), "badnets", attack_cache_root, badnets_cache_key)
                     stage_elapsed_seconds["badnets"] = time.time() - stage_t0
                     stage_status.mark_completed("badnets", badnets_metrics)
             else:
-                stage_t0 = time.time()
-                badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
-                save_model_cache(badnets_attack.get_model(), "badnets", output_dir)
-                stage_elapsed_seconds["badnets"] = time.time() - stage_t0
-                stage_status.mark_completed("badnets", badnets_metrics)
+                pattern, weight = make_badnets_trigger()
+                badnets_attack = core.BadNets(
+                    train_dataset=trainset,
+                    test_dataset=testset,
+                    model=build_cifar10_model(),
+                    loss=nn.CrossEntropyLoss(),
+                    y_target=cfg.y_target,
+                    poisoned_rate=cfg.attack_poisoned_rate_badnets,
+                    pattern=pattern,
+                    weight=weight,
+                    seed=cfg.seed,
+                    deterministic=cfg.deterministic,
+                )
+                cached_model = None
+                if not cfg.force_rebuild:
+                    cached_model = load_model_cache(build_cifar10_model(), "badnets", attack_cache_root, badnets_cache_key)
+
+                if cached_model is not None:
+                    badnets_attack.model = cached_model
+                    eval_device = pick_eval_device(cfg)
+                    badnets_metrics = {
+                        "attack": "BadNets",
+                        "clean": evaluate_attack_base(badnets_attack, badnets_attack.test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "poisoned": evaluate_attack_base(badnets_attack, badnets_attack.poisoned_test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                    }
+                    logger.log("Stage[BadNets]: reused shared attack cache.")
+                    stage_elapsed_seconds["badnets"] = 0.0
+                    stage_status.mark_completed("badnets", badnets_metrics)
+                else:
+                    stage_t0 = time.time()
+                    badnets_attack, badnets_metrics = run_badnets(cfg, trainset, testset, logger)
+                    save_model_cache(badnets_attack.get_model(), "badnets", attack_cache_root, badnets_cache_key)
+                    stage_elapsed_seconds["badnets"] = time.time() - stage_t0
+                    stage_status.mark_completed("badnets", badnets_metrics)
             all_metrics["stages"]["badnets"] = badnets_metrics
         else:
             logger.log("Stage[BadNets]: skipped by --only-attack.")
 
         blended_attack = None
         if run_blended_flag:
+            blended_cache_key = make_attack_cache_key("blended", cfg)
             if stage_status.is_completed("blended", cfg.force_rebuild):
                 logger.log("Stage[Blended]: loading from cache.")
+                pattern, weight = make_blended_trigger()
                 blended_attack = core.Blended(
                     train_dataset=trainset,
                     test_dataset=testset,
@@ -986,15 +1095,20 @@ def main() -> None:
                     loss=nn.CrossEntropyLoss(),
                     y_target=cfg.y_target,
                     poisoned_rate=cfg.attack_poisoned_rate_blended,
-                    pattern=None,
-                    weight=None,
+                    pattern=pattern,
+                    weight=weight,
                     seed=cfg.seed,
                     deterministic=cfg.deterministic,
                 )
-                cached_model = load_model_cache(build_cifar10_model(), "blended", output_dir)
+                cached_model = load_model_cache(build_cifar10_model(), "blended", attack_cache_root, blended_cache_key)
                 if cached_model is not None:
                     blended_attack.model = cached_model
-                    blended_metrics = stage_status.status.get("blended_meta", {})
+                    eval_device = pick_eval_device(cfg)
+                    blended_metrics = {
+                        "attack": "Blended",
+                        "clean": evaluate_attack_base(blended_attack, blended_attack.test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "poisoned": evaluate_attack_base(blended_attack, blended_attack.poisoned_test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                    }
                     logger.log("Stage[Blended]: loaded from cache successfully.")
                     stage_elapsed_seconds["blended"] = 0.0
                 else:
@@ -1002,21 +1116,51 @@ def main() -> None:
                     stage_status.mark_failed("blended", "cache load failed")
                     stage_t0 = time.time()
                     blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
-                    save_model_cache(blended_attack.get_model(), "blended", output_dir)
+                    save_model_cache(blended_attack.get_model(), "blended", attack_cache_root, blended_cache_key)
                     stage_elapsed_seconds["blended"] = time.time() - stage_t0
                     stage_status.mark_completed("blended", blended_metrics)
             else:
-                stage_t0 = time.time()
-                blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
-                save_model_cache(blended_attack.get_model(), "blended", output_dir)
-                stage_elapsed_seconds["blended"] = time.time() - stage_t0
-                stage_status.mark_completed("blended", blended_metrics)
+                pattern, weight = make_blended_trigger()
+                blended_attack = core.Blended(
+                    train_dataset=trainset,
+                    test_dataset=testset,
+                    model=build_cifar10_model(),
+                    loss=nn.CrossEntropyLoss(),
+                    y_target=cfg.y_target,
+                    poisoned_rate=cfg.attack_poisoned_rate_blended,
+                    pattern=pattern,
+                    weight=weight,
+                    seed=cfg.seed,
+                    deterministic=cfg.deterministic,
+                )
+                cached_model = None
+                if not cfg.force_rebuild:
+                    cached_model = load_model_cache(build_cifar10_model(), "blended", attack_cache_root, blended_cache_key)
+
+                if cached_model is not None:
+                    blended_attack.model = cached_model
+                    eval_device = pick_eval_device(cfg)
+                    blended_metrics = {
+                        "attack": "Blended",
+                        "clean": evaluate_attack_base(blended_attack, blended_attack.test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "poisoned": evaluate_attack_base(blended_attack, blended_attack.poisoned_test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                    }
+                    logger.log("Stage[Blended]: reused shared attack cache.")
+                    stage_elapsed_seconds["blended"] = 0.0
+                    stage_status.mark_completed("blended", blended_metrics)
+                else:
+                    stage_t0 = time.time()
+                    blended_attack, blended_metrics = run_blended(cfg, trainset, testset, logger)
+                    save_model_cache(blended_attack.get_model(), "blended", attack_cache_root, blended_cache_key)
+                    stage_elapsed_seconds["blended"] = time.time() - stage_t0
+                    stage_status.mark_completed("blended", blended_metrics)
             all_metrics["stages"]["blended"] = blended_metrics
         else:
             logger.log("Stage[Blended]: skipped by --only-attack.")
 
         lc_attack = None
         if run_lc_flag:
+            lc_cache_key = make_attack_cache_key("label_consistent", cfg)
             if stage_status.is_completed("label_consistent", cfg.force_rebuild):
                 logger.log("Stage[LabelConsistent]: loading from cache.")
                 pattern, weight = make_lc_trigger()
@@ -1047,10 +1191,16 @@ def main() -> None:
                     seed=cfg.seed,
                     deterministic=cfg.deterministic,
                 )
-                cached_model = load_model_cache(build_cifar10_model(), "label_consistent", output_dir)
+                cached_model = load_model_cache(build_cifar10_model(), "label_consistent", attack_cache_root, lc_cache_key)
                 if cached_model is not None:
                     lc_attack.model = cached_model
-                    lc_metrics = stage_status.status.get("label_consistent_meta", {})
+                    eval_device = pick_eval_device(cfg)
+                    lc_metrics = {
+                        "attack": "LabelConsistent",
+                        "clean": evaluate_attack_base(lc_attack, lc_attack.test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "poisoned": evaluate_attack_base(lc_attack, lc_attack.poisoned_test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "adv_dataset_dir": str(adv_dir),
+                    }
                     logger.log("Stage[LabelConsistent]: loaded from cache successfully.")
                     stage_elapsed_seconds["label_consistent"] = 0.0
                 else:
@@ -1058,15 +1208,60 @@ def main() -> None:
                     stage_status.mark_failed("label_consistent", "cache load failed")
                     stage_t0 = time.time()
                     lc_attack, lc_metrics = run_label_consistent(cfg, trainset, testset, benign_model, logger)
-                    save_model_cache(lc_attack.get_model(), "label_consistent", output_dir)
+                    save_model_cache(lc_attack.get_model(), "label_consistent", attack_cache_root, lc_cache_key)
                     stage_elapsed_seconds["label_consistent"] = time.time() - stage_t0
                     stage_status.mark_completed("label_consistent", lc_metrics)
             else:
-                stage_t0 = time.time()
-                lc_attack, lc_metrics = run_label_consistent(cfg, trainset, testset, benign_model, logger)
-                save_model_cache(lc_attack.get_model(), "label_consistent", output_dir)
-                stage_elapsed_seconds["label_consistent"] = time.time() - stage_t0
-                stage_status.mark_completed("label_consistent", lc_metrics)
+                pattern, weight = make_lc_trigger()
+                adv_dir = Path(cfg.adv_dataset_root) / (
+                    f"CIFAR10_eps{cfg.lc_eps}_alpha{cfg.lc_alpha}_steps{cfg.lc_steps}_"
+                    f"poisoned_rate{cfg.attack_poisoned_rate_lc}_seed{cfg.seed}"
+                )
+                lc_attack = core.LabelConsistent(
+                    train_dataset=trainset,
+                    test_dataset=testset,
+                    model=build_cifar10_model(),
+                    adv_model=copy.deepcopy(benign_model),
+                    adv_dataset_dir=str(adv_dir),
+                    loss=nn.CrossEntropyLoss(),
+                    y_target=cfg.y_target,
+                    poisoned_rate=cfg.attack_poisoned_rate_lc,
+                    adv_transform=Compose([ToTensor()]),
+                    pattern=pattern,
+                    weight=weight,
+                    eps=cfg.lc_eps,
+                    alpha=cfg.lc_alpha,
+                    steps=cfg.lc_steps,
+                    max_pixel=255,
+                    poisoned_transform_train_index=0,
+                    poisoned_transform_test_index=0,
+                    poisoned_target_transform_index=0,
+                    schedule=make_attack_schedule(cfg, "CIFAR10_ResNet18_LabelConsistent", benign_training=False, epochs=cfg.lc_epochs),
+                    seed=cfg.seed,
+                    deterministic=cfg.deterministic,
+                )
+                cached_model = None
+                if not cfg.force_rebuild:
+                    cached_model = load_model_cache(build_cifar10_model(), "label_consistent", attack_cache_root, lc_cache_key)
+
+                if cached_model is not None:
+                    lc_attack.model = cached_model
+                    eval_device = pick_eval_device(cfg)
+                    lc_metrics = {
+                        "attack": "LabelConsistent",
+                        "clean": evaluate_attack_base(lc_attack, lc_attack.test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "poisoned": evaluate_attack_base(lc_attack, lc_attack.poisoned_test_dataset, eval_device, cfg.batch_size, cfg.num_workers),
+                        "adv_dataset_dir": str(adv_dir),
+                    }
+                    logger.log("Stage[LabelConsistent]: reused shared attack cache.")
+                    stage_elapsed_seconds["label_consistent"] = 0.0
+                    stage_status.mark_completed("label_consistent", lc_metrics)
+                else:
+                    stage_t0 = time.time()
+                    lc_attack, lc_metrics = run_label_consistent(cfg, trainset, testset, benign_model, logger)
+                    save_model_cache(lc_attack.get_model(), "label_consistent", attack_cache_root, lc_cache_key)
+                    stage_elapsed_seconds["label_consistent"] = time.time() - stage_t0
+                    stage_status.mark_completed("label_consistent", lc_metrics)
             all_metrics["stages"]["label_consistent"] = lc_metrics
         else:
             if cfg.skip_lc:
