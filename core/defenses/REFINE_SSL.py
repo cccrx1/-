@@ -152,7 +152,7 @@ class REFINE_SSL(REFINE):
         loss_func = torch.nn.BCELoss(reduction='mean')
         optimizer = torch.optim.Adam(self.unet.parameters(), schedule['lr'], schedule['betas'], schedule['eps'], schedule['weight_decay'], schedule['amsgrad'])
 
-        work_dir = osp.join(schedule['save_dir'], schedule['experiment_name'] + '_' + time.strftime('%Y-%m-%d_%H:%M:%S', time.localtime()))
+        work_dir = osp.join(schedule['save_dir'], schedule['experiment_name'] + '_' + time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime()))
         os.makedirs(work_dir, exist_ok=True)
         log = Log(osp.join(work_dir, 'log.txt'))
         torch.save(self.arr_shuffle, os.path.join(work_dir, 'label_shuffle.pth'))
