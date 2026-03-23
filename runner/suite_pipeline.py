@@ -23,12 +23,20 @@ import torch
 import torch.nn as nn
 import torchvision
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, RandomHorizontalFlip, ToTensor
+from torchvision.transforms import Compose, ConvertImageDtype, PILToTensor, RandomHorizontalFlip
 
 import core
 from core.attacks.base import accuracy as attack_accuracy
 from runner.pipeline_state import PipelineRunLock, StageLogger, StageStatusManager
 from runner.suite_config import RuntimeConfig, parse_suite_args
+
+
+def build_tensor_transform() -> Compose:
+    """Convert PIL image to float tensor in [0, 1] without numpy dependency."""
+    return Compose([
+        PILToTensor(),
+        ConvertImageDtype(torch.float32),
+    ])
 
 
 def set_global_seed(seed: int, deterministic: bool) -> None:
@@ -56,11 +64,10 @@ def ensure_cifar10_downloaded(dataset_root: str, logger: StageLogger) -> Tuple[t
 
     train_transform = Compose([
         RandomHorizontalFlip(),
-        ToTensor(),
+        PILToTensor(),
+        ConvertImageDtype(torch.float32),
     ])
-    test_transform = Compose([
-        ToTensor(),
-    ])
+    test_transform = build_tensor_transform()
 
     trainset = torchvision.datasets.CIFAR10(
         root=str(root),
@@ -289,7 +296,7 @@ def build_label_consistent_attack(cfg: RuntimeConfig, trainset, testset, benign_
         loss=nn.CrossEntropyLoss(),
         y_target=cfg.y_target,
         poisoned_rate=cfg.attack_poisoned_rate_lc,
-        adv_transform=Compose([ToTensor()]),
+        adv_transform=build_tensor_transform(),
         pattern=pattern,
         weight=weight,
         eps=cfg.lc_eps,
