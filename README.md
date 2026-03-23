@@ -1,95 +1,105 @@
 # CIFAR-10 Attack + REFINE Suite
 
-This mini project integrates the following workflow into one entry script:
+统一的 CIFAR-10 攻防实验工程，包含：
 
-1. Train benign ResNet-18 on CIFAR-10.
-2. Train three backdoor attacks on CIFAR-10:
-   - BadNets
-   - Blended
-   - Label-Consistent
-3. Train and evaluate REFINE defense for each attacked model.
-4. Save structured metrics to JSON.
+1. 干净模型训练（ResNet-18）
+2. 三类后门攻击（BadNets / Blended / Label-Consistent）
+3. 三类防御变体（REFINE / REFINE_CG / REFINE_SSL）
+4. 结构化指标输出（json + markdown）
 
-## File
+## 项目结构
 
-- `run_cifar10_attack_refine_suite.py`: unified experiment entry.
+- 根目录只保留：`run.py`、`README.md`、`requirements-lock.txt`
+- `core/`: 核心算法与模型实现（攻击、防御、模型、工具函数）
+- `runner/`: 运行时公共模块与流水线主实现
+- `test/`: 实验编排脚本与矩阵配置（case/suite）
 
-## Environment Notes
+推荐按以下职责边界维护：
 
-Target runtime (as requested):
+- 只在 `core/` 放算法与模型逻辑
+- 只在 `test/` 放实验编排、case 选择、矩阵配置
+- 顶层脚本只做入口聚合与兼容转发
 
-- PyTorch 2.2.0
-- Python 3.10 (Ubuntu 22.04)
-- MUSA 3.1.0 / 1x GPU
+其中：
 
-The script follows the original project style and keeps `core` interfaces unchanged.
-If your environment uses CUDA-compatible APIs in PyTorch (common with many wrappers),
-use `--device-mode GPU --cuda-selected-devices 0`.
+- `runner/suite_config.py` 统一维护 suite 的 CLI 参数与 `RuntimeConfig`
+- `runner/pipeline_state.py` 统一维护 `StageStatusManager`、`StageLogger`、`PipelineRunLock`
+- `runner/suite_pipeline.py` 负责单次完整流水线编排（由 `run.py single` 调用）
 
-## Dependencies
+## 环境安装
 
-This project depends on:
+建议使用 Python 3.10-3.13（推荐 3.11 或 3.12）。
 
-- numpy
-- Pillow
-- opencv-python
-- tqdm
-- torch==2.2.0
-- torchvision==0.17.0
-
-Install with:
+推荐使用锁定版本安装：
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-lock.txt
 ```
 
-If you use a custom CUDA/MUSA build, install your platform-specific `torch` and `torchvision` first,
-then run the command above.
+若你使用自定义 CUDA/MUSA 轮子，可先安装对应 `torch/torchvision`，再补装其余依赖。
 
-## Localized Modules
+## 统一运行入口
 
-This project now vendors the required `core` modules locally under:
+所有运行模式都走 `run.py`：
 
-- `projects/cifar10_attack_refine_suite/core/attacks`
-- `projects/cifar10_attack_refine_suite/core/defenses`
-- `projects/cifar10_attack_refine_suite/core/models`
-- `projects/cifar10_attack_refine_suite/core/utils`
-
-So the experiment entry script does not rely on the repository root `core` package anymore.
-
-## Main Outputs
-
-- Per-stage training logs from core modules under:
-  - `projects/cifar10_attack_refine_suite/runs/...`
-- Unified pipeline log:
-  - `projects/cifar10_attack_refine_suite/runs/pipeline.log`
-- Unified metrics summary:
-  - `projects/cifar10_attack_refine_suite/runs/metrics_summary.json`
-
-## Example Command
-
-Run from repository root:
+### 1) 单次运行（single）
 
 ```bash
-python projects/cifar10_attack_refine_suite/run_cifar10_attack_refine_suite.py \
-  --dataset-root ./datasets \
-  --output-root ./projects/cifar10_attack_refine_suite/runs \
-  --adv-dataset-root ./projects/cifar10_attack_refine_suite/adv_dataset \
-  --device-mode GPU \
-  --cuda-selected-devices 0 \
-  --batch-size 128 \
-  --num-workers 8 \
-  --y-target 0
+python run.py single \
+  --only-attack badnets \
+  --defense-variant refine_ssl \
+  --refine-epochs 50 \
+  --ssl-weight 0.02 \
+  --ssl-temperature 0.07 \
+  --output-root ./experiments/test/single_demo/runs \
+  --adv-dataset-root ./experiments/test/single_demo/adv_dataset
 ```
 
-## Default Parameters
+### 2) 运行单个矩阵 case（case）
 
-Defaults are already tuned for a single high-memory GPU:
+```bash
+python run.py case --case badnets_refine_ssl_50
+```
 
-- Batch size: `128`
-- Workers: `8`
-- Benign epochs: `200`
-- Attack epochs: `200`
-- REFINE epochs: `150`
-- Poisoned rate: BadNets `0.05`, Blended `0.05`, LC `0.25`
-- LC PGD: `eps=8.0, alpha=1.5, steps=100`
+可覆盖矩阵参数：
+
+```bash
+python run.py case --case badnets_refine_ssl_50 --ssl-weight 0.005 --force-rebuild
+```
+
+### 3) 批量运行矩阵（suite）
+
+```bash
+python run.py suite --cases all
+```
+
+只跑指定 case：
+
+```bash
+python run.py suite --cases badnets_refine,blended_refine_ssl_50
+```
+
+## 参数组织
+
+`run.py` 统一暴露以下参数：
+
+- 通用参数：数据路径、设备、batch、worker、epoch、攻击比例
+- 防御特有参数：
+  - REFINE_CG: `--cg-threshold`, `--cg-temperature`, `--cg-strength`
+  - REFINE_SSL: `--ssl-temperature`, `--ssl-weight`
+- 运行控制参数：`--skip-lc`, `--force-rebuild`, `--attack-cache-root`
+
+## 可扩展性建议
+
+新增一个实验 case 时，建议只改一个文件：
+
+1. 在 `test/test_matrix.json` 增加新 case
+2. 使用 `python run.py case --case <new_case>` 验证
+3. 需要批量跑时，直接用 `python run.py suite --cases all`
+
+这样可以避免为每个 case 新增重复脚本。
+
+## 结果输出
+
+- 单次流水线：`<output_root>/metrics_summary.json`
+- 批量汇总：`./experiments/test/summary/suite_summary_*.json` 与 `.md`

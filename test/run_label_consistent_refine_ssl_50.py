@@ -1,12 +1,9 @@
 """Compatibility wrapper for label_consistent_refine_ssl_50 case."""
 
-import subprocess
 import sys
-from pathlib import Path
+
+from test.wrapper_utils import run_named_case
 
 
 if __name__ == "__main__":
-    root = Path(__file__).resolve().parents[1]
-    run_case = root / "test" / "run_case.py"
-    cmd = [sys.executable, str(run_case), "--case", "label_consistent_refine_ssl_50", *sys.argv[1:]]
-    raise SystemExit(subprocess.run(cmd, cwd=str(root), check=False).returncode)
+    raise SystemExit(run_named_case("label_consistent_refine_ssl_50", sys.argv[1:]))

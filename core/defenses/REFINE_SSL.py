@@ -32,7 +32,7 @@ class REFINE_SSL(REFINE):
                  seed=0,
                  deterministic=False,
                  temperature=0.07,
-                 selfsup_weight=0.1):
+                 selfsup_weight=0.02):
         super(REFINE_SSL, self).__init__(
             unet=unet,
             model=model,

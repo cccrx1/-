@@ -1,11 +1,9 @@
-"""Unified runner for matrix-driven cases in test/test_matrix.json.
+"""Matrix-driven suite runner.
 
-Examples:
-python run_test_suite.py
-python run_test_suite.py --list-cases
-python run_test_suite.py --cases badnets_refine,blended_refine_ssl_50
-python run_test_suite.py --dry-run -- --batch-size 256
-python run_test_suite.py -- --cuda-selected-devices 0
+Responsibilities:
+1) Resolve cases from test/test_matrix.json
+2) Launch each case through test/run_case.py
+3) Aggregate stage metrics into summary json/md
 """
 
 import argparse
@@ -14,6 +12,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from test.matrix_utils import collect_case_metrics, get_cases, load_matrix, resolve_cases
 
 
 def parse_args():
@@ -29,77 +29,6 @@ def parse_args():
     if passthrough and passthrough[0] == "--":
         passthrough = passthrough[1:]
     return args, passthrough
-
-
-def load_matrix(matrix_path: Path):
-    with matrix_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    cases = data.get("cases", {})
-    if not isinstance(cases, dict) or not cases:
-        raise ValueError(f"Invalid or empty cases in matrix: {matrix_path}")
-    return cases
-
-
-def resolve_cases(cases_text: str, known_cases):
-    if cases_text == "all":
-        return list(known_cases)
-
-    names = [item.strip() for item in cases_text.split(",") if item.strip()]
-    invalid = [name for name in names if name not in known_cases]
-    if invalid:
-        raise ValueError(f"Unknown cases: {invalid}. Supported: {list(known_cases)}")
-    return names
-
-
-def stage_keys_from_attack(only_attack: str):
-    mapping = {
-        "badnets": ("badnets", "refine_badnets"),
-        "blended": ("blended", "refine_blended"),
-        "label_consistent": ("label_consistent", "refine_label_consistent"),
-    }
-    return mapping.get(only_attack, (None, None))
-
-
-def safe_get_top1(stage_dict, metric_key):
-    if not isinstance(stage_dict, dict):
-        return None
-    metric = stage_dict.get(metric_key)
-    if not isinstance(metric, dict):
-        return None
-    val = metric.get("top1_acc")
-    return float(val) if isinstance(val, (int, float)) else None
-
-
-def collect_case_metrics(root: Path, case_cfg):
-    output_root = case_cfg.get("output_root")
-    if not isinstance(output_root, str):
-        return {"error": "missing output_root in matrix"}
-
-    summary_path = (root / output_root / "metrics_summary.json").resolve()
-    if not summary_path.exists():
-        return {"error": f"metrics not found: {summary_path}"}
-
-    with summary_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    stages = data.get("stages", {}) if isinstance(data, dict) else {}
-    attack_key, refine_key = stage_keys_from_attack(str(case_cfg.get("only_attack", "")))
-
-    attack_stage = stages.get(attack_key, {}) if attack_key else {}
-    refine_stage = stages.get(refine_key, {}) if refine_key else {}
-
-    clean_before = safe_get_top1(attack_stage, "clean")
-    poisoned_before = safe_get_top1(attack_stage, "poisoned")
-    clean_after = safe_get_top1(refine_stage, "clean_after_refine")
-    poisoned_after = safe_get_top1(refine_stage, "poisoned_after_refine")
-
-    return {
-        "summary_path": str(summary_path),
-        "clean_before": clean_before,
-        "poisoned_before": poisoned_before,
-        "clean_after": clean_after,
-        "poisoned_after": poisoned_after,
-    }
 
 
 def write_aggregate_summary(summary_dir: Path, run_report):
@@ -148,9 +77,10 @@ def write_aggregate_summary(summary_dir: Path, run_report):
 
 def main():
     args, passthrough = parse_args()
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     matrix_path = (root / args.matrix).resolve()
-    matrix_cases = load_matrix(matrix_path)
+    matrix = load_matrix(matrix_path)
+    matrix_cases = get_cases(matrix)
 
     if args.list_cases:
         print("Available cases:")
