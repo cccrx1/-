@@ -155,6 +155,15 @@ def make_attack_schedule(cfg: RuntimeConfig, experiment_name: str, benign_traini
 
 
 def make_refine_schedule(cfg: RuntimeConfig, experiment_name: str, epochs: int) -> Dict:
+    if epochs < 4:
+        refine_milestones: List[int] = []
+    else:
+        m1 = max(1, int(0.6 * epochs))
+        m2 = max(m1 + 1, int(0.8 * epochs))
+        if m2 >= epochs:
+            m2 = epochs - 1
+        refine_milestones = [m1] if m1 >= m2 else [m1, m2]
+
     schedule = {
         "device": cfg.device_mode,
         "CUDA_VISIBLE_DEVICES": cfg.cuda_selected_devices,
@@ -166,7 +175,7 @@ def make_refine_schedule(cfg: RuntimeConfig, experiment_name: str, epochs: int) 
         "eps": 1e-8,
         "weight_decay": 0.0,
         "amsgrad": False,
-        "schedule": [100, 130],
+        "schedule": refine_milestones,
         "gamma": 0.1,
         "epochs": epochs,
         "log_iteration_interval": 100,

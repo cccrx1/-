@@ -8,6 +8,7 @@ import os
 import os.path as osp
 import random
 import time
+from copy import deepcopy
 
 import numpy as np
 import torch
@@ -159,6 +160,9 @@ class REFINE_SSL(REFINE):
 
         iteration = 0
         last_time = time.time()
+        best_eval_loss = float("inf")
+        best_epoch = 0
+        best_unet_state = None
 
         msg = f"Total train samples: {len(train_dataset)}\nTotal test samples: {len(test_dataset)}\nBatch size: {schedule['batch_size']}\niteration every epoch: {len(train_dataset) // schedule['batch_size']}\nInitial learning rate: {schedule['lr']}\n"
         log(msg)
@@ -197,10 +201,18 @@ class REFINE_SSL(REFINE):
 
             if (i + 1) % schedule['test_epoch_interval'] == 0:
                 loss = self._test(test_dataset, device, schedule['batch_size'], schedule['num_workers'])
+                loss_value = float(loss.item() if hasattr(loss, 'item') else loss)
                 msg = '==========Test result on test dataset==========\n' + \
                       time.strftime('[%Y-%m-%d_%H:%M:%S] ', time.localtime()) + \
-                      f'loss: {loss}, time: {time.time()-last_time}\n'
+                    f'loss: {loss_value}, time: {time.time()-last_time}\n'
                 log(msg)
+
+                if loss_value < best_eval_loss:
+                  best_eval_loss = loss_value
+                  best_epoch = i + 1
+                  best_unet_state = deepcopy(self.unet.state_dict())
+                  torch.save(best_unet_state, os.path.join(work_dir, 'best_ckpt.pth'))
+                  log(f"[Best] epoch={best_epoch}, test_loss={best_eval_loss:.6f}\n")
 
                 self.unet = self.unet.to(device)
                 self.unet.train()
@@ -213,3 +225,9 @@ class REFINE_SSL(REFINE):
                 torch.save(self.unet.state_dict(), ckpt_unet_path)
                 self.unet = self.unet.to(device)
                 self.unet.train()
+
+        if best_unet_state is not None:
+            self.unet.load_state_dict(best_unet_state)
+            self.unet = self.unet.to(device)
+            self.unet.eval()
+            log(f"Restore best checkpoint from epoch={best_epoch}, test_loss={best_eval_loss:.6f}\n")
