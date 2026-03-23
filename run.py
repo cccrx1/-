@@ -119,6 +119,24 @@ def parse_args() -> argparse.Namespace:
     single = sub.add_parser("single", help="Run one direct pipeline job with explicit parameters.")
     _add_pipeline_args(single, with_defaults=True)
 
+    smoke = sub.add_parser("smoke", help="Run a quick 1-epoch pipeline smoke check.")
+    smoke.add_argument("--dry-run", action="store_true", default=False)
+    _add_pipeline_args(smoke, with_defaults=True)
+    smoke.set_defaults(
+        only_attack="badnets",
+        defense_variant="refine",
+        benign_epochs=1,
+        attack_epochs=1,
+        lc_epochs=1,
+        refine_epochs=1,
+        batch_size=256,
+        num_workers=0,
+        device_mode="CPU",
+        output_root="./experiments/smoke/runs",
+        adv_dataset_root="./experiments/smoke/adv_dataset",
+        force_rebuild=True,
+    )
+
     case = sub.add_parser("case", help="Run one matrix-defined case from test/test_matrix.json.")
     case.add_argument("--case", type=str, required=True)
     case.add_argument("--matrix", type=str, default="test/test_matrix.json")
@@ -141,8 +159,11 @@ def main() -> None:
     args = parse_args()
     root = Path(__file__).resolve().parent
 
-    if args.mode == "single":
+    if args.mode in ("single", "smoke"):
         cmd = [sys.executable, "-m", "runner.suite_pipeline", *_pipeline_args_to_cmd(args, include_defaults=True)]
+        if args.mode == "smoke" and getattr(args, "dry_run", False):
+            print("Command:", " ".join(cmd))
+            raise SystemExit(0)
     elif args.mode == "case":
         cmd = [
             sys.executable,

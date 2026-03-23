@@ -783,6 +783,35 @@ def parse_args() -> RuntimeConfig:
     return parse_suite_args()
 
 
+def log_runtime_environment(cfg: RuntimeConfig, logger: StageLogger) -> None:
+    py_ver = sys.version.split()[0]
+    torch_ver = getattr(torch, "__version__", "unknown")
+    torchvision_ver = getattr(torchvision, "__version__", "unknown")
+    numpy_ver = getattr(np, "__version__", "unknown")
+    cuda_available = torch.cuda.is_available()
+    cuda_runtime = torch.version.cuda if getattr(torch, "version", None) is not None else None
+
+    logger.log(
+        "Environment: "
+        f"python={py_ver}, "
+        f"torch={torch_ver}, "
+        f"torchvision={torchvision_ver}, "
+        f"numpy={numpy_ver}, "
+        f"cuda_available={cuda_available}, "
+        f"torch_cuda={cuda_runtime}"
+    )
+
+    if cfg.device_mode == "GPU" and not cuda_available:
+        logger.log("[WARN] device_mode=GPU but CUDA is unavailable. Consider switching to --device-mode CPU.")
+
+    if numpy_ver.startswith("2.") and (
+        torchvision_ver.startswith("0.17")
+        or torchvision_ver.startswith("0.18")
+        or torchvision_ver.startswith("0.19")
+    ):
+        logger.log("[WARN] numpy>=2 with torchvision<0.20 may cause ToTensor compatibility issues in some environments.")
+
+
 def main() -> None:
     cfg = parse_args()
 
@@ -805,6 +834,7 @@ def main() -> None:
         logger.log("Pipeline init: CIFAR-10 benign + BadNets/Blended/LabelConsistent + REFINE.")
         logger.log(f"Run metadata: pid={os.getpid()}, cwd={os.getcwd()}, command={' '.join(sys.argv)}")
         logger.log(f"Runtime config: {asdict(cfg)}")
+        log_runtime_environment(cfg, logger)
 
         run_signature = build_run_signature(cfg)
         previous_signature = stage_status.status.get("_run_signature")
