@@ -142,13 +142,12 @@ def main() -> None:
     root = Path(__file__).resolve().parent
 
     if args.mode == "single":
-        target = root / "runner" / "suite_pipeline.py"
-        cmd = [sys.executable, str(target), *_pipeline_args_to_cmd(args, include_defaults=True)]
+        cmd = [sys.executable, "-m", "runner.suite_pipeline", *_pipeline_args_to_cmd(args, include_defaults=True)]
     elif args.mode == "case":
-        target = root / "test" / "run_case.py"
         cmd = [
             sys.executable,
-            str(target),
+            "-m",
+            "test.run_case",
             "--case",
             args.case,
             "--matrix",
@@ -158,10 +157,10 @@ def main() -> None:
             cmd.append("--dry-run")
         cmd.extend(_pipeline_args_to_cmd(args, include_defaults=False))
     else:
-        target = root / "test" / "run_test_suite.py"
         cmd = [
             sys.executable,
-            str(target),
+            "-m",
+            "test.run_test_suite",
             "--cases",
             args.cases,
             "--matrix",

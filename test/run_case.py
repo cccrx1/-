@@ -26,8 +26,7 @@ def main():
     matrix_path = (root / args.matrix).resolve()
     case_cfg = load_case_config(matrix_path, args.case)
 
-    suite_script = root / "runner" / "suite_pipeline.py"
-    cmd = [args.python, str(suite_script), *case_cfg_to_cli_args(case_cfg), *passthrough]
+    cmd = [args.python, "-m", "runner.suite_pipeline", *case_cfg_to_cli_args(case_cfg), *passthrough]
 
     print("Case:", args.case)
     print("Matrix:", str(matrix_path))
