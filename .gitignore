@@ -15,5 +15,4 @@ __pycache__/
 .cache/
 
 .vscode/
-
 .conda/**
