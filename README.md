@@ -111,6 +111,8 @@ python run.py smoke
   - --only-attack (all/badnets/blended/label_consistent)
   - --force-rebuild
   - --attack-cache-root
+  - --pretrained-benign-model-path
+  - --pretrained-attack-model-path
 
 ### 2.2 攻击特有参数
 
@@ -366,3 +368,11 @@ python run.py smoke
 - --attack-cache-root
   - 作用: 指定攻击模型缓存根目录以跨 case 复用。
   - 可能效果: 可显著降低批量实验耗时；参数变更后需结合签名策略避免误复用。
+
+- --pretrained-benign-model-path
+  - 作用: 显式加载预训练纯净模型（ResNet-18）用于需要 benign 模型的流程（如 Label-Consistent）。
+  - 可能效果: 可复用你已训练的高质量纯净模型，减少重复训练并提升可比性。
+
+- --pretrained-attack-model-path
+  - 作用: 显式加载预训练攻击模型（ResNet-18），在单攻击模式（--only-attack 指定单一分支）下优先使用。
+  - 可能效果: 可直接复用你效果更好的攻击模型进行防御对比；当 --only-attack=all 时该参数会被忽略。

@@ -48,6 +48,8 @@ def _add_pipeline_args(parser: argparse.ArgumentParser, with_defaults: bool) -> 
 
     parser.add_argument("--only-attack", type=str, choices=["all", "badnets", "blended", "label_consistent"], default=default("all"))
     parser.add_argument("--attack-cache-root", type=str, default=default(""))
+    parser.add_argument("--pretrained-benign-model-path", type=str, default=default(""))
+    parser.add_argument("--pretrained-attack-model-path", type=str, default=default(""))
     parser.add_argument("--skip-lc", action="store_true", default=default(False))
     parser.add_argument("--force-rebuild", action="store_true", default=default(False))
 
@@ -95,6 +97,8 @@ def _pipeline_args_to_cmd(args: argparse.Namespace, include_defaults: bool) -> L
         ("--ssl-weight", "ssl_weight"),
         ("--only-attack", "only_attack"),
         ("--attack-cache-root", "attack_cache_root"),
+        ("--pretrained-benign-model-path", "pretrained_benign_model_path"),
+        ("--pretrained-attack-model-path", "pretrained_attack_model_path"),
     ]
 
     for flag, attr in keys:

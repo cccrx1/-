@@ -38,6 +38,8 @@ class RuntimeConfig:
     ssl_weight: float = 0.02
     only_attack: str = "all"
     attack_cache_root: str = ""
+    pretrained_benign_model_path: str = ""
+    pretrained_attack_model_path: str = ""
     force_rebuild: bool = False
 
 
@@ -84,6 +86,10 @@ def parse_suite_args() -> RuntimeConfig:
                         help="Only run the specified attack + corresponding REFINE stage")
     parser.add_argument("--attack-cache-root", type=str, default="",
                         help="Optional shared cache root for attack-stage models to enable cross-case reuse")
+    parser.add_argument("--pretrained-benign-model-path", type=str, default="",
+                        help="Optional path to pretrained benign ResNet-18 model checkpoint")
+    parser.add_argument("--pretrained-attack-model-path", type=str, default="",
+                        help="Optional path to pretrained attacked ResNet-18 model checkpoint (effective when only one attack stage is run)")
     parser.add_argument("--force-rebuild", action="store_true", default=False,
                         help="Force rebuild all stages, ignore cached results")
 
@@ -120,5 +126,7 @@ def parse_suite_args() -> RuntimeConfig:
         ssl_weight=args.ssl_weight,
         only_attack=args.only_attack,
         attack_cache_root=args.attack_cache_root,
+        pretrained_benign_model_path=args.pretrained_benign_model_path,
+        pretrained_attack_model_path=args.pretrained_attack_model_path,
         force_rebuild=args.force_rebuild,
     )

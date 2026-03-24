@@ -570,6 +570,8 @@ def build_run_signature(cfg: RuntimeConfig) -> Dict[str, object]:
         "ssl_weight": cfg.ssl_weight,
         "only_attack": cfg.only_attack,
         "skip_lc": cfg.skip_lc,
+        "pretrained_benign_model_path": cfg.pretrained_benign_model_path,
+        "pretrained_attack_model_path": cfg.pretrained_attack_model_path,
     }
 
 
@@ -619,6 +621,39 @@ def load_refine_cache(name: str, output_dir: Path) -> Optional[Dict]:
         with cache_path.open("r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
+        return None
+
+
+def load_pretrained_cifar10_model(model_path: str, logger: StageLogger, stage_label: str) -> Optional[nn.Module]:
+    if not model_path:
+        return None
+
+    path = Path(model_path)
+    if not path.exists():
+        logger.log(f"{stage_label}: pretrained model path does not exist: {path}")
+        return None
+
+    try:
+        state_obj = torch.load(path, map_location="cpu")
+        if isinstance(state_obj, dict) and "state_dict" in state_obj and isinstance(state_obj["state_dict"], dict):
+            state_obj = state_obj["state_dict"]
+
+        if isinstance(state_obj, dict):
+            cleaned_state = {}
+            for key, value in state_obj.items():
+                if key.startswith("module."):
+                    cleaned_state[key[len("module."):]] = value
+                else:
+                    cleaned_state[key] = value
+            state_obj = cleaned_state
+
+        model = build_cifar10_model()
+        model.load_state_dict(state_obj, strict=True)
+        model.eval()
+        logger.log(f"{stage_label}: loaded pretrained model from {path}.")
+        return model
+    except Exception as exc:
+        logger.log(f"{stage_label}: failed to load pretrained model from {path}, fallback to default flow. reason={exc}")
         return None
 
 
@@ -677,12 +712,24 @@ def run_or_load_attack_stage(
     cache_key: str,
     stage_display_name: str,
     attack_metric_name: str,
+    pretrained_model_path: str,
     build_attack_fn: Callable[[], Tuple[object, Optional[Path]]],
     run_attack_fn: Callable[[], Tuple[object, Dict]],
     logger: StageLogger,
 ) -> object:
     stage_label = f"Stage[{stage_display_name}]"
     attack_obj, adv_dir = build_attack_fn()
+
+    pretrained_model = load_pretrained_cifar10_model(pretrained_model_path, logger, stage_label)
+    if pretrained_model is not None:
+        attack_obj.model = pretrained_model
+        metrics = build_attack_metrics(cfg, attack_obj, attack_metric_name, adv_dataset_dir=adv_dir)
+        logger.log(f"{stage_label}: using --pretrained-attack-model-path.")
+        save_model_cache(attack_obj.get_model(), cache_name, attack_cache_root, cache_key)
+        stage_elapsed_seconds[stage_key] = 0.0
+        stage_status.mark_completed(stage_key, metrics)
+        all_metrics["stages"][stage_key] = metrics
+        return attack_obj
 
     if stage_status.is_completed(stage_key, cfg.force_rebuild):
         logger.log(f"{stage_label}: loading from cache.")
@@ -865,10 +912,26 @@ def main() -> None:
         run_badnets_flag = cfg.only_attack in ("all", "badnets")
         run_blended_flag = cfg.only_attack in ("all", "blended")
         run_lc_flag = cfg.only_attack in ("all", "label_consistent") and (not cfg.skip_lc)
+        if cfg.pretrained_attack_model_path and cfg.only_attack == "all":
+            logger.log("[WARN] --pretrained-attack-model-path is ignored when --only-attack=all. Please specify one attack stage.")
 
         benign_model = None
         if run_lc_flag:
-            if stage_status.is_completed("benign", cfg.force_rebuild):
+            benign_model = load_pretrained_cifar10_model(
+                cfg.pretrained_benign_model_path,
+                logger,
+                "Stage[Benign]",
+            )
+            if benign_model is not None:
+                stage_elapsed_seconds["benign"] = 0.0
+                stage_status.mark_completed("benign")
+                all_metrics["stages"]["benign"] = {
+                    "model": "ResNet18",
+                    "dataset": "CIFAR10",
+                    "source": "pretrained",
+                    "path": cfg.pretrained_benign_model_path,
+                }
+            elif stage_status.is_completed("benign", cfg.force_rebuild):
                 logger.log("Stage[Benign]: loading from cache.")
                 benign_model = load_model_cache(build_cifar10_model(), "benign", output_dir)
                 if benign_model is None:
@@ -888,10 +951,11 @@ def main() -> None:
                 save_model_cache(benign_model, "benign", output_dir)
                 stage_elapsed_seconds["benign"] = time.time() - stage_t0
                 stage_status.mark_completed("benign")
-            all_metrics["stages"]["benign"] = {
-                "model": "ResNet18",
-                "dataset": "CIFAR10",
-            }
+            if "benign" not in all_metrics["stages"]:
+                all_metrics["stages"]["benign"] = {
+                    "model": "ResNet18",
+                    "dataset": "CIFAR10",
+                }
         else:
             logger.log("Stage[Benign]: skipped (only required for LabelConsistent pipeline).")
 
@@ -909,6 +973,7 @@ def main() -> None:
                 cache_key=badnets_cache_key,
                 stage_display_name="BadNets",
                 attack_metric_name="BadNets",
+                pretrained_model_path=cfg.pretrained_attack_model_path if cfg.only_attack == "badnets" else "",
                 build_attack_fn=lambda: (build_badnets_attack(cfg, trainset, testset), None),
                 run_attack_fn=lambda: run_badnets(cfg, trainset, testset, logger),
                 logger=logger,
@@ -930,6 +995,7 @@ def main() -> None:
                 cache_key=blended_cache_key,
                 stage_display_name="Blended",
                 attack_metric_name="Blended",
+                pretrained_model_path=cfg.pretrained_attack_model_path if cfg.only_attack == "blended" else "",
                 build_attack_fn=lambda: (build_blended_attack(cfg, trainset, testset), None),
                 run_attack_fn=lambda: run_blended(cfg, trainset, testset, logger),
                 logger=logger,
@@ -951,6 +1017,7 @@ def main() -> None:
                 cache_key=lc_cache_key,
                 stage_display_name="LabelConsistent",
                 attack_metric_name="LabelConsistent",
+                pretrained_model_path=cfg.pretrained_attack_model_path if cfg.only_attack == "label_consistent" else "",
                 build_attack_fn=lambda: build_label_consistent_attack(cfg, trainset, testset, benign_model),
                 run_attack_fn=lambda: run_label_consistent(cfg, trainset, testset, benign_model, logger),
                 logger=logger,
