@@ -36,6 +36,12 @@ class RuntimeConfig:
     cg_strength: float = 1.0
     ssl_temperature: float = 0.07
     ssl_weight: float = 0.02
+    pdb_trigger_type: int = 1
+    pdb_pix_value: float = 1.0
+    pdb_target_shift: int = 1
+    pdb_weight: float = 0.5
+    pdb_batch_ratio: float = 0.5
+    pdb_apply_inference_trigger: bool = True
     only_attack: str = "all"
     attack_cache_root: str = ""
     pretrained_benign_model_path: str = ""
@@ -69,7 +75,7 @@ def parse_suite_args() -> RuntimeConfig:
     parser.add_argument("--refine-first-channels", type=int, default=64)
     parser.add_argument("--skip-lc", action="store_true",
                         help="Skip LabelConsistent attack and REFINE on LabelConsistent in this run")
-    parser.add_argument("--defense-variant", type=str, default="refine", choices=["refine", "refine_cg", "refine_ssl"],
+    parser.add_argument("--defense-variant", type=str, default="refine", choices=["refine", "refine_cg", "refine_ssl", "refine_pdb", "refine_pdb_ssl"],
                         help="Defense backbone variant used in REFINE stage")
     parser.add_argument("--cg-threshold", type=float, default=0.35,
                         help="Suspicion threshold for REFINE_CG gate")
@@ -81,6 +87,18 @@ def parse_suite_args() -> RuntimeConfig:
                         help="Temperature for REFINE_SSL contrastive logits")
     parser.add_argument("--ssl-weight", type=float, default=0.02,
                         help="Loss weight of self-supervised term in REFINE_SSL")
+    parser.add_argument("--pdb-trigger-type", type=int, default=1, choices=[0, 1, 2],
+                        help="Defensive trigger mask type for PDB-guided variants")
+    parser.add_argument("--pdb-pix-value", type=float, default=1.0,
+                        help="Pixel value used by defensive trigger (image is clamped to [0,1])")
+    parser.add_argument("--pdb-target-shift", type=int, default=1,
+                        help="Class shift used by proactive defensive target mapping h(y)=y+s")
+    parser.add_argument("--pdb-weight", type=float, default=0.5,
+                        help="Loss weight of proactive defensive trigger guidance")
+    parser.add_argument("--pdb-batch-ratio", type=float, default=0.5,
+                        help="Per-batch sample ratio used for proactive defensive guidance")
+    parser.add_argument("--no-pdb-inference-trigger", action="store_true", default=False,
+                        help="Disable adding defensive trigger in forward/inference for PDB variants")
     parser.add_argument("--only-attack", type=str, default="all",
                         choices=["all", "badnets", "blended", "label_consistent"],
                         help="Only run the specified attack + corresponding REFINE stage")
@@ -124,6 +142,12 @@ def parse_suite_args() -> RuntimeConfig:
         cg_strength=args.cg_strength,
         ssl_temperature=args.ssl_temperature,
         ssl_weight=args.ssl_weight,
+        pdb_trigger_type=args.pdb_trigger_type,
+        pdb_pix_value=args.pdb_pix_value,
+        pdb_target_shift=args.pdb_target_shift,
+        pdb_weight=args.pdb_weight,
+        pdb_batch_ratio=args.pdb_batch_ratio,
+        pdb_apply_inference_trigger=not args.no_pdb_inference_trigger,
         only_attack=args.only_attack,
         attack_cache_root=args.attack_cache_root,
         pretrained_benign_model_path=args.pretrained_benign_model_path,

@@ -39,12 +39,18 @@ def _add_pipeline_args(parser: argparse.ArgumentParser, with_defaults: bool) -> 
     parser.add_argument("--refine-first-channels", type=int, default=default(64))
 
     # Method-specific defense parameters.
-    parser.add_argument("--defense-variant", type=str, choices=["refine", "refine_cg", "refine_ssl"], default=default("refine"))
+    parser.add_argument("--defense-variant", type=str, choices=["refine", "refine_cg", "refine_ssl", "refine_pdb", "refine_pdb_ssl"], default=default("refine"))
     parser.add_argument("--cg-threshold", type=float, default=default(0.35))
     parser.add_argument("--cg-temperature", type=float, default=default(0.10))
     parser.add_argument("--cg-strength", type=float, default=default(1.0))
     parser.add_argument("--ssl-temperature", type=float, default=default(0.07))
     parser.add_argument("--ssl-weight", type=float, default=default(0.02))
+    parser.add_argument("--pdb-trigger-type", type=int, choices=[0, 1, 2], default=default(1))
+    parser.add_argument("--pdb-pix-value", type=float, default=default(1.0))
+    parser.add_argument("--pdb-target-shift", type=int, default=default(1))
+    parser.add_argument("--pdb-weight", type=float, default=default(0.5))
+    parser.add_argument("--pdb-batch-ratio", type=float, default=default(0.5))
+    parser.add_argument("--no-pdb-inference-trigger", action="store_true", default=default(False))
 
     parser.add_argument("--only-attack", type=str, choices=["all", "badnets", "blended", "label_consistent"], default=default("all"))
     parser.add_argument("--attack-cache-root", type=str, default=default(""))
@@ -95,6 +101,11 @@ def _pipeline_args_to_cmd(args: argparse.Namespace, include_defaults: bool) -> L
         ("--cg-strength", "cg_strength"),
         ("--ssl-temperature", "ssl_temperature"),
         ("--ssl-weight", "ssl_weight"),
+        ("--pdb-trigger-type", "pdb_trigger_type"),
+        ("--pdb-pix-value", "pdb_pix_value"),
+        ("--pdb-target-shift", "pdb_target_shift"),
+        ("--pdb-weight", "pdb_weight"),
+        ("--pdb-batch-ratio", "pdb_batch_ratio"),
         ("--only-attack", "only_attack"),
         ("--attack-cache-root", "attack_cache_root"),
         ("--pretrained-benign-model-path", "pretrained_benign_model_path"),
@@ -112,6 +123,8 @@ def _pipeline_args_to_cmd(args: argparse.Namespace, include_defaults: bool) -> L
         _append_bool(cmd, "--skip-lc", getattr(args, "skip_lc", False))
     if include_defaults or getattr(args, "force_rebuild", False):
         _append_bool(cmd, "--force-rebuild", getattr(args, "force_rebuild", False))
+    if include_defaults or getattr(args, "no_pdb_inference_trigger", False):
+        _append_bool(cmd, "--no-pdb-inference-trigger", getattr(args, "no_pdb_inference_trigger", False))
 
     return cmd
 

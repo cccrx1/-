@@ -461,6 +461,28 @@ def run_refine_for_attack(
             cg_strength=cfg.cg_strength,
             cg_enable=True,
         )
+    elif cfg.defense_variant == "refine_pdb":
+        defense = core.REFINE_PDB(
+            **defense_kwargs,
+            pdb_trigger_type=cfg.pdb_trigger_type,
+            pdb_pix_value=cfg.pdb_pix_value,
+            pdb_target_shift=cfg.pdb_target_shift,
+            pdb_weight=cfg.pdb_weight,
+            pdb_batch_ratio=cfg.pdb_batch_ratio,
+            pdb_apply_inference_trigger=cfg.pdb_apply_inference_trigger,
+        )
+    elif cfg.defense_variant == "refine_pdb_ssl":
+        defense = core.REFINE_PDB_SSL(
+            **defense_kwargs,
+            temperature=cfg.ssl_temperature,
+            selfsup_weight=cfg.ssl_weight,
+            pdb_trigger_type=cfg.pdb_trigger_type,
+            pdb_pix_value=cfg.pdb_pix_value,
+            pdb_target_shift=cfg.pdb_target_shift,
+            pdb_weight=cfg.pdb_weight,
+            pdb_batch_ratio=cfg.pdb_batch_ratio,
+            pdb_apply_inference_trigger=cfg.pdb_apply_inference_trigger,
+        )
     elif cfg.defense_variant == "refine_ssl":
         defense = core.REFINE_SSL(
             **defense_kwargs,
