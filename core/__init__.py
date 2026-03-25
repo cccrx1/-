@@ -1,6 +1,4 @@
-from .attacks import BadNets, Blended, LabelConsistent
-from .defenses import REFINE, REFINE_CG, REFINE_SSL
-from . import models
+from . import attacks, defenses, models
 
 __all__ = [
     "BadNets",
@@ -9,5 +7,22 @@ __all__ = [
     "REFINE",
     "REFINE_CG",
     "REFINE_SSL",
+    "REFINE_PDB",
+    "REFINE_PDB_SSL",
     "models",
 ]
+
+_ATTACK_EXPORTS = {"BadNets", "Blended", "LabelConsistent"}
+_DEFENSE_EXPORTS = {"REFINE", "REFINE_CG", "REFINE_SSL", "REFINE_PDB", "REFINE_PDB_SSL"}
+
+
+def __getattr__(name):
+    if name in _ATTACK_EXPORTS:
+        value = getattr(attacks, name)
+        globals()[name] = value
+        return value
+    if name in _DEFENSE_EXPORTS:
+        value = getattr(defenses, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module 'core' has no attribute '{name}'")
