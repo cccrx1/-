@@ -50,6 +50,9 @@ def _add_pipeline_args(parser: argparse.ArgumentParser, with_defaults: bool) -> 
     parser.add_argument("--pdb-target-shift", type=int, default=default(1))
     parser.add_argument("--pdb-weight", type=float, default=default(0.5))
     parser.add_argument("--pdb-batch-ratio", type=float, default=default(0.5))
+    parser.add_argument("--pdb-warmup-ratio", type=float, default=default(0.3))
+    parser.add_argument("--ssl-warmup-ratio", type=float, default=default(0.3))
+    parser.add_argument("--aux-loss-cap-ratio", type=float, default=default(1.5))
     parser.add_argument("--no-pdb-inference-trigger", action="store_true", default=default(False))
 
     parser.add_argument("--only-attack", type=str, choices=["all", "badnets", "blended", "label_consistent"], default=default("all"))
@@ -106,6 +109,9 @@ def _pipeline_args_to_cmd(args: argparse.Namespace, include_defaults: bool) -> L
         ("--pdb-target-shift", "pdb_target_shift"),
         ("--pdb-weight", "pdb_weight"),
         ("--pdb-batch-ratio", "pdb_batch_ratio"),
+        ("--pdb-warmup-ratio", "pdb_warmup_ratio"),
+        ("--ssl-warmup-ratio", "ssl_warmup_ratio"),
+        ("--aux-loss-cap-ratio", "aux_loss_cap_ratio"),
         ("--only-attack", "only_attack"),
         ("--attack-cache-root", "attack_cache_root"),
         ("--pretrained-benign-model-path", "pretrained_benign_model_path"),
