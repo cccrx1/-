@@ -1,0 +1,43 @@
+我的毕业论文主题是数据投毒的防御，你可以阅读COMPLETE_PROJECT_HANDBOOK_2026-03-26.md来获取我的当前进度，现在我想以refine为基准方法，提出一些改进，或者是将refine方法与其他方法结合起来，但是效果并不理想，你可以评估一下现在我改进refine或者将其与pdb结合的方法是否有可行性，然后向我提供一条合理的毕设理论研究以及实验路线
+你只需要给我运行命令的方案就可以，稍后我会再服务器上进行实验
+
+下面给你一套只需要在服务器上跑的命令方案（覆盖最小实验集 + 消融 + 汇总）。我按你的“Decoupled PDB-REFINE”主张组织：Decoupled=只关闭推理期PDB触发器注入 --no-pdb-inference-trigger。
+
+统一参数建议保持不变：seed=666、refine-epochs=50、ssl-weight=0.02、ssl-warmup-ratio=0.4、pdb-weight=0.3、pdb-batch-ratio=0.2、pdb-warmup-ratio=0.4、pdb-trigger-type=1
+
+1) BadNets 最小实验集（R / RSB / Decoupled）
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_R_refine_e50_s666" --only-attack badnets --defense-variant refine --refine-epochs 50 --seed 666 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_RSB_refine_pdb_ssl_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 1 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_Decoupled_refine_pdb_ssl_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 1 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+2) Blended 最小实验集（R / RSB / Decoupled）
+2.1 先跑 R（生成 Blended 攻击ckpt，后面两组复用）
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/blended_R_refine_e50_s666" --only-attack blended --defense-variant refine --refine-epochs 50 --seed 666
+2.2 从上一步输出目录里找到 Blended 的 ckpt_epoch_200.pth
+在服务器上执行一次（路径会自动匹配你刚才的输出目录）：
+
+(Get-ChildItem -Recurse -Filter "ckpt_epoch_200.pth" "./experiments/minimal_decoupled_pdb/blended_R_refine_e50_s666" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+把查询结果路径记为：BLENDED_CKPT_200
+
+2.3 RSB（推理期启用PDB触发器注入）
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/blended_RSB_refine_pdb_ssl_e50_s666" --only-attack blended --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 1 --pretrained-attack-model-path "BLENDED_CKPT_200"
+2.4 Decoupled（推理期关闭PDB触发器注入）
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/blended_Decoupled_refine_pdb_ssl_e50_s666" --only-attack blended --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 1 --pretrained-attack-model-path "BLENDED_CKPT_200"
+3) 消融实验（机制性证据；建议先对 BadNets 跑，Blended 视时间加跑）
+3.1 pdb-trigger-type 扫描（Decoupled 版本）
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_Decoupled_pdbtrigger0_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 0 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_Decoupled_pdbtrigger1_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 1 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_Decoupled_pdbtrigger2_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 2 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+3.2 pdb-weight / pdb-batch-ratio 小范围（Decoupled 版本）
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_Decoupled_pdbw02_br02_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.2 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.4 --pdb-trigger-type 1 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_Decoupled_pdbw04_br03_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.4 --pdb-weight 0.4 --pdb-batch-ratio 0.3 --pdb-warmup-ratio 0.4 --pdb-trigger-type 1 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+3.3 时序消融：把 warmup 从 0.4 调到 0.5（Decoupled 版本）
+python run.py single --output-root "./experiments/minimal_decoupled_pdb/badnets_Decoupled_warmup05_e50_s666" --only-attack badnets --defense-variant refine_pdb_ssl --refine-epochs 50 --seed 666 --no-pdb-inference-trigger --ssl-weight 0.02 --ssl-warmup-ratio 0.5 --pdb-weight 0.3 --pdb-batch-ratio 0.2 --pdb-warmup-ratio 0.5 --pdb-trigger-type 1 --pretrained-attack-model-path "./experiments/pdb_b_badnets_s666/runs/CIFAR10_ResNet18_BadNets_2026-03-25_15-19-31/ckpt_epoch_200.pth"
+4) 汇总结果（跑完上述实验后）
+python tools/append_experiment_matrix.py
+如果你想在服务器上重新从头重建表格：
+
+python tools/append_experiment_matrix.py --rebuild
+如果你告诉我：服务器上目录结构是否和你当前一致（尤其是 ./experiments/... 的相对路径），我可以把上面所有命令再替你改成“完全不需要你替换路径/只需复制粘贴”的最终版。
+
+
+我先只想看看这个方案可不可行，所以我只做了2）结果已经放在experiments文件夹中，你可以按时间排序读取实验结果，并告诉我将refine和pdb如此结合的方案路径是否可行合理

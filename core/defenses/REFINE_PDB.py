@@ -309,7 +309,10 @@ class REFINE_PDB(_PDBMixin, REFINE):
                 features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
                 supconloss = supconloss_func(features, f_index)
 
-                pdb_loss = self._pdb_guidance_loss(self.X_adv, f_index)
+                if self.pdb_apply_inference_trigger:
+                    pdb_loss = self._pdb_guidance_loss(self.X_adv, f_index)
+                else:
+                    pdb_loss = torch.zeros((), device=device, dtype=ce_loss.dtype)
                 ce_loss = loss_func(logit, f_label)
                 pdb_weight_now = self._effective_aux_weight(self.pdb_weight, i, schedule['epochs'], self.pdb_warmup_ratio)
                 pdb_loss_capped = self._cap_aux_loss(pdb_loss, ce_loss)
@@ -563,7 +566,10 @@ class REFINE_PDB_SSL(REFINE_PDB):
                 logit = self.forward(batch_img)
                 ce_loss = loss_func(logit, f_label)
                 loss_self = self._selfsup_contrastive_loss(batch_img)
-                loss_pdb = self._pdb_guidance_loss(self.X_adv, f_index)
+                if self.pdb_apply_inference_trigger:
+                    loss_pdb = self._pdb_guidance_loss(self.X_adv, f_index)
+                else:
+                    loss_pdb = torch.zeros((), device=device, dtype=ce_loss.dtype)
                 ssl_weight_now = self._effective_aux_weight(self.selfsup_weight, i, schedule['epochs'], self.ssl_warmup_ratio)
                 pdb_weight_now = self._effective_aux_weight(self.pdb_weight, i, schedule['epochs'], self.pdb_warmup_ratio)
                 loss_self_capped = self._cap_aux_loss(loss_self, ce_loss)
