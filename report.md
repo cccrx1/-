@@ -121,3 +121,101 @@ python tools/append_experiment_matrix.py --rebuild
 如需调整“塌缩”阈值：
 
 python tools/append_experiment_matrix.py --collapse-ba-threshold 0.35
+
+## 10) 改进方法核心理论与公式（可直接用于报告）
+
+### 10.1 目标与符号
+
+- 目标：在保持较高干净精度（BA）的同时，显著降低后门攻击成功率（ASR）。
+- 记攻击模型为 $f(\cdot)$，净化网络为 $g_\theta(\cdot)$，输入为 $x$。
+- 攻击模型对原图的伪标签为：
+
+$$
+	ilde{y}=\arg\max f(x)
+$$
+
+### 10.2 核心改进思想（从“强耦合”改为“可控协同”）
+
+1. 主任务优先：以 REFINE 的 clean-alignment 目标作为主目标，避免辅助项主导训练。
+2. 渐进式注入：SSL/PDB 权重在前期 warmup，小步注入，后期再达到设定强度。
+3. 辅助项上限保护：对每个辅助损失做相对 CE 的封顶，防止 BA 被拖垮。
+4. 稳定选优：验证阶段用稳定主损失做 best checkpoint 选择，降低随机项扰动。
+
+### 10.3 基础 REFINE 目标
+
+令 $p_\theta(x)=\mathrm{softmax}(f(g_\theta(x)))$，$\hat{y}(x)$ 为 one-hot 伪标签。
+
+$$
+\mathcal{L}_{\mathrm{base}}=\mathcal{L}_{\mathrm{CE/BCE}}\big(p_\theta(x),\hat{y}(x)\big)
+$$
+
+原始实现中还包含监督对比项（SupCon），写作：
+
+$$
+\mathcal{L}_{\mathrm{refine}}=\mathcal{L}_{\mathrm{base}}+\lambda_{\mathrm{sup}}\,\mathcal{L}_{\mathrm{supcon}}
+$$
+
+### 10.4 PDB 主动防御项
+
+- 设防御触发器变换为 $T(\cdot)$，目标类别平移映射为 $h(y)=y+s$（模类别数）。
+- 在 batch 子集 $S$ 上定义主动约束：
+
+$$
+\mathcal{L}_{\mathrm{pdb}}=\mathrm{CE}\Big(f\big(T(g_\theta(x_S))\big),\,h\big(\tilde{y}_S\big)\Big)
+$$
+
+含义：净化后图像若再加“防御触发器”，模型应输出可控平移标签，从而削弱真实后门触发路径。
+
+### 10.5 SSL 项
+
+对同一样本两种增强视图 $v_1,v_2$ 经净化后表征做对比学习：
+
+$$
+\mathcal{L}_{\mathrm{ssl}}=\mathrm{NT\text{-}Xent}(z_1,z_2;\tau)
+$$
+
+其中 $\tau$ 为温度参数，$z_i$ 为归一化表示。
+
+### 10.6 Warmup 与 Loss Cap（防塌缩关键）
+
+对任一辅助分支 $u\in\{\mathrm{ssl},\mathrm{pdb}\}$：
+
+$$
+w_u(t)=w_u^{\star}\cdot\min\left(1,\frac{t+1}{\max(1,\lfloor r_uE\rfloor)}\right)
+$$
+
+- $w_u^{\star}$：目标权重；$r_u$：warmup 比例；$E$：总 epoch。
+
+辅助项封顶（相对 CE）：
+
+$$
+\overline{\mathcal{L}}_u=\min\left(\mathcal{L}_u,\,\rho\,\mathcal{L}_{\mathrm{CE}}\right)
+$$
+
+- $\rho$ 即 `aux_loss_cap_ratio`。
+
+### 10.7 最终训练目标
+
+RB（refine+pdb）：
+
+$$
+\mathcal{L}_{\mathrm{RB}}=\mathcal{L}_{\mathrm{CE}}+\lambda_{\mathrm{sup}}\mathcal{L}_{\mathrm{supcon}}+w_{\mathrm{pdb}}(t)\,\overline{\mathcal{L}}_{\mathrm{pdb}}
+$$
+
+RSB（refine+ssl+pdb）：
+
+$$
+\mathcal{L}_{\mathrm{RSB}}=\mathcal{L}_{\mathrm{CE}}+w_{\mathrm{ssl}}(t)\,\overline{\mathcal{L}}_{\mathrm{ssl}}+w_{\mathrm{pdb}}(t)\,\overline{\mathcal{L}}_{\mathrm{pdb}}
+$$
+
+### 10.8 推理侧策略
+
+- 默认建议 `--no-pdb-inference-trigger`（推理不加防御触发器），优先保 BA 稳定。
+- 若启用推理触发器，需要做类别反平移补偿（$h^{-1}$）以避免系统性偏移。
+
+### 10.9 参数与现象对应关系（经验）
+
+- `pdb_weight`、`pdb_batch_ratio` 同时过大，且推理触发器开启时，最易 BA 塌缩。
+- `ssl_weight` 建议小步搜索（如 0.001~0.005），避免与主任务冲突。
+- `pdb_warmup_ratio`、`ssl_warmup_ratio` 增大通常更稳，但可能减慢 ASR 下降速度。
+- `aux_loss_cap_ratio` 偏小更稳 BA，偏大更激进；建议先从 1.2~1.5 起步。
