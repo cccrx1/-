@@ -133,6 +133,7 @@ class REFINE_PDB(_PDBMixin, REFINE):
         pdb_batch_ratio=0.5,
         pdb_apply_inference_trigger=True,
         pdb_warmup_ratio=0.3,
+        ssl_warmup_ratio=0.3,
         aux_loss_cap_ratio=1.5,
     ):
         super(REFINE_PDB, self).__init__(
@@ -153,6 +154,7 @@ class REFINE_PDB(_PDBMixin, REFINE):
             pdb_batch_ratio=pdb_batch_ratio,
             pdb_apply_inference_trigger=pdb_apply_inference_trigger,
             pdb_warmup_ratio=pdb_warmup_ratio,
+            ssl_warmup_ratio=ssl_warmup_ratio,
             aux_loss_cap_ratio=aux_loss_cap_ratio,
         )
 
