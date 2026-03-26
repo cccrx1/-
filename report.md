@@ -95,3 +95,29 @@ python run.py single --dataset-root ./datasets --output-root ./experiments/exp_r
 python run.py single --dataset-root ./datasets --output-root ./experiments/exp_refine_pdb_ssl_v2_balanced_s666 --seed 666 --only-attack badnets --pretrained-attack-model-path $CKPT --defense-variant refine_pdb_ssl --refine-epochs 150 --ssl-weight 0.0015 --pdb-weight 0.08 --pdb-batch-ratio 0.15 --ssl-warmup-ratio 0.40 --pdb-warmup-ratio 0.35 --aux-loss-cap-ratio 1.2 --no-pdb-inference-trigger
 
 若目标是进一步降 ASR，可在保持 `aux-loss-cap-ratio=1.2` 不变时，逐步提升 `pdb-weight`（每次 +0.01），并观察 BA 是否仍 >= 0.85。
+
+## 9) 自动汇总脚本（增量追加）
+
+新增脚本：`tools/append_experiment_matrix.py`
+
+用途：
+
+- 自动扫描 `experiments/**/metrics_summary.json`
+- 将每次实验的 BA/ASR 与关键参数追加到项目根目录 `experiment_matrix.csv`
+- 同步生成便于阅读的表格（项目根目录）`experiment_matrix.md`
+- 默认按 `run_path` 去重，只追加新实验
+- 默认过滤“数据塌缩”实验：`refine_ba < 0.30` 不写入表格
+- 方法缩写标签：`R=refine`、`RS=refine+ssl`、`RB=refine+pdb`、`RSB=refine+ssl+pdb`
+- 表格展示规则：按 `Method` 排序；`Attack` 列展示攻击方式；`Run` 放在表格最后一列
+
+执行命令：
+
+python tools/append_experiment_matrix.py
+
+首次或想全量重建时：
+
+python tools/append_experiment_matrix.py --rebuild
+
+如需调整“塌缩”阈值：
+
+python tools/append_experiment_matrix.py --collapse-ba-threshold 0.35
