@@ -18,3 +18,7 @@ __pycache__/
 .conda/**
 
 /Proactive_Defensive_Backdoor-main/**
+
+/report.txt
+experiments/test/summary/suite_summary_20260322_202840.json
+experiments/test/summary/suite_summary_20260322_202840.json

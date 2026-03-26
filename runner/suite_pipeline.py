@@ -470,6 +470,8 @@ def run_refine_for_attack(
             pdb_weight=cfg.pdb_weight,
             pdb_batch_ratio=cfg.pdb_batch_ratio,
             pdb_apply_inference_trigger=cfg.pdb_apply_inference_trigger,
+            pdb_warmup_ratio=cfg.pdb_warmup_ratio,
+            aux_loss_cap_ratio=cfg.aux_loss_cap_ratio,
         )
     elif cfg.defense_variant == "refine_pdb_ssl":
         defense = core.REFINE_PDB_SSL(
@@ -482,6 +484,9 @@ def run_refine_for_attack(
             pdb_weight=cfg.pdb_weight,
             pdb_batch_ratio=cfg.pdb_batch_ratio,
             pdb_apply_inference_trigger=cfg.pdb_apply_inference_trigger,
+            pdb_warmup_ratio=cfg.pdb_warmup_ratio,
+            ssl_warmup_ratio=cfg.ssl_warmup_ratio,
+            aux_loss_cap_ratio=cfg.aux_loss_cap_ratio,
         )
     elif cfg.defense_variant == "refine_ssl":
         defense = core.REFINE_SSL(
@@ -590,6 +595,15 @@ def build_run_signature(cfg: RuntimeConfig) -> Dict[str, object]:
         "cg_strength": cfg.cg_strength,
         "ssl_temperature": cfg.ssl_temperature,
         "ssl_weight": cfg.ssl_weight,
+        "pdb_trigger_type": cfg.pdb_trigger_type,
+        "pdb_pix_value": cfg.pdb_pix_value,
+        "pdb_target_shift": cfg.pdb_target_shift,
+        "pdb_weight": cfg.pdb_weight,
+        "pdb_batch_ratio": cfg.pdb_batch_ratio,
+        "pdb_apply_inference_trigger": cfg.pdb_apply_inference_trigger,
+        "pdb_warmup_ratio": cfg.pdb_warmup_ratio,
+        "ssl_warmup_ratio": cfg.ssl_warmup_ratio,
+        "aux_loss_cap_ratio": cfg.aux_loss_cap_ratio,
         "only_attack": cfg.only_attack,
         "skip_lc": cfg.skip_lc,
         "pretrained_benign_model_path": cfg.pretrained_benign_model_path,

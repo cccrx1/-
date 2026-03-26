@@ -25,6 +25,9 @@ class _PDBMixin:
         pdb_weight=0.5,
         pdb_batch_ratio=0.5,
         pdb_apply_inference_trigger=True,
+        pdb_warmup_ratio=0.3,
+        ssl_warmup_ratio=0.3,
+        aux_loss_cap_ratio=1.5,
     ):
         self.pdb_trigger_type = int(pdb_trigger_type)
         self.pdb_pix_value = float(pdb_pix_value)
@@ -32,6 +35,25 @@ class _PDBMixin:
         self.pdb_weight = float(pdb_weight)
         self.pdb_batch_ratio = float(pdb_batch_ratio)
         self.pdb_apply_inference_trigger = bool(pdb_apply_inference_trigger)
+        self.pdb_warmup_ratio = max(0.0, float(pdb_warmup_ratio))
+        self.ssl_warmup_ratio = max(0.0, float(ssl_warmup_ratio))
+        self.aux_loss_cap_ratio = max(0.0, float(aux_loss_cap_ratio))
+
+    @staticmethod
+    def _aux_progress_scale(current_epoch: int, total_epochs: int, warmup_ratio: float) -> float:
+        if warmup_ratio <= 0.0 or total_epochs <= 0:
+            return 1.0
+        warmup_epochs = max(1, int(round(total_epochs * warmup_ratio)))
+        return min(1.0, float(current_epoch + 1) / float(warmup_epochs))
+
+    def _effective_aux_weight(self, base_weight: float, current_epoch: int, total_epochs: int, warmup_ratio: float) -> float:
+        return float(base_weight) * self._aux_progress_scale(current_epoch, total_epochs, warmup_ratio)
+
+    def _cap_aux_loss(self, aux_loss: torch.Tensor, ce_loss: torch.Tensor) -> torch.Tensor:
+        if self.aux_loss_cap_ratio <= 0.0:
+            return aux_loss
+        cap = ce_loss.detach() * self.aux_loss_cap_ratio
+        return torch.minimum(aux_loss, cap)
 
     def _trigger_mask(self, images: torch.Tensor) -> torch.Tensor:
         _, c, h, w = images.shape
@@ -110,6 +132,8 @@ class REFINE_PDB(_PDBMixin, REFINE):
         pdb_weight=0.5,
         pdb_batch_ratio=0.5,
         pdb_apply_inference_trigger=True,
+        pdb_warmup_ratio=0.3,
+        aux_loss_cap_ratio=1.5,
     ):
         super(REFINE_PDB, self).__init__(
             unet=unet,
@@ -128,6 +152,8 @@ class REFINE_PDB(_PDBMixin, REFINE):
             pdb_weight=pdb_weight,
             pdb_batch_ratio=pdb_batch_ratio,
             pdb_apply_inference_trigger=pdb_apply_inference_trigger,
+            pdb_warmup_ratio=pdb_warmup_ratio,
+            aux_loss_cap_ratio=aux_loss_cap_ratio,
         )
 
     def forward(self, image):
@@ -182,9 +208,8 @@ class REFINE_PDB(_PDBMixin, REFINE):
                 f1, f2 = features, features
                 features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
                 supconloss = supconloss_func(features, f_index)
-
-                pdb_loss = self._pdb_guidance_loss(self.X_adv, f_index)
-                loss = loss_func(logit, f_label).mean() + self.lmd * supconloss + self.pdb_weight * pdb_loss
+                # Keep validation selection stable: prioritize clean alignment objective only.
+                loss = loss_func(logit, f_label).mean() + self.lmd * supconloss
                 losses.append(loss.detach().cpu().view(1))
 
             losses = torch.cat(losses, dim=0)
@@ -255,6 +280,7 @@ class REFINE_PDB(_PDBMixin, REFINE):
             f"iteration every epoch: {len(train_dataset) // schedule['batch_size']}\n"
             f"Initial learning rate: {schedule['lr']}\n"
             f"PDB weight: {self.pdb_weight}, batch_ratio: {self.pdb_batch_ratio}, trigger_type: {self.pdb_trigger_type}, target_shift: {self.pdb_target_shift}\n"
+            f"PDB warmup ratio: {self.pdb_warmup_ratio}, aux loss cap ratio: {self.aux_loss_cap_ratio}\n"
         )
         log(msg)
 
@@ -282,7 +308,10 @@ class REFINE_PDB(_PDBMixin, REFINE):
                 supconloss = supconloss_func(features, f_index)
 
                 pdb_loss = self._pdb_guidance_loss(self.X_adv, f_index)
-                loss = loss_func(logit, f_label) + self.lmd * supconloss + self.pdb_weight * pdb_loss
+                ce_loss = loss_func(logit, f_label)
+                pdb_weight_now = self._effective_aux_weight(self.pdb_weight, i, schedule['epochs'], self.pdb_warmup_ratio)
+                pdb_loss_capped = self._cap_aux_loss(pdb_loss, ce_loss)
+                loss = ce_loss + self.lmd * supconloss + pdb_weight_now * pdb_loss_capped
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -294,7 +323,8 @@ class REFINE_PDB(_PDBMixin, REFINE):
                     msg = (
                         time.strftime('[%Y-%m-%d_%H:%M:%S] ', time.localtime())
                         + f"Epoch:{i+1}/{schedule['epochs']}, iteration:{batch_id + 1}/{len(train_dataset)//schedule['batch_size']}, "
-                          f"lr: {schedule['lr']}, loss: {float(loss)}, supcon: {float(supconloss)}, pdb: {float(pdb_loss)}, time: {time.time()-last_time}\n"
+                                                    f"lr: {schedule['lr']}, loss: {float(loss)}, ce: {float(ce_loss)}, supcon: {float(supconloss)}, "
+                                                    f"pdb: {float(pdb_loss)}, pdb_capped: {float(pdb_loss_capped)}, pdb_w: {pdb_weight_now:.4f}, time: {time.time()-last_time}\n"
                     )
                     last_time = time.time()
                     log(msg)
@@ -354,6 +384,9 @@ class REFINE_PDB_SSL(REFINE_PDB):
         pdb_weight=0.5,
         pdb_batch_ratio=0.5,
         pdb_apply_inference_trigger=True,
+        pdb_warmup_ratio=0.3,
+        ssl_warmup_ratio=0.3,
+        aux_loss_cap_ratio=1.5,
     ):
         super(REFINE_PDB_SSL, self).__init__(
             unet=unet,
@@ -370,6 +403,9 @@ class REFINE_PDB_SSL(REFINE_PDB):
             pdb_weight=pdb_weight,
             pdb_batch_ratio=pdb_batch_ratio,
             pdb_apply_inference_trigger=pdb_apply_inference_trigger,
+            pdb_warmup_ratio=pdb_warmup_ratio,
+            ssl_warmup_ratio=ssl_warmup_ratio,
+            aux_loss_cap_ratio=aux_loss_cap_ratio,
         )
         self.temperature = float(temperature)
         self.selfsup_weight = float(selfsup_weight)
@@ -432,9 +468,8 @@ class REFINE_PDB_SSL(REFINE_PDB):
 
                 logit = self.forward(batch_img)
                 ce_loss = loss_func(logit, f_label).mean()
-                loss_self = self._selfsup_contrastive_loss(batch_img)
-                loss_pdb = self._pdb_guidance_loss(self.X_adv, f_index)
-                total_loss = ce_loss + self.selfsup_weight * loss_self + self.pdb_weight * loss_pdb
+                # Keep validation selection stable: use clean alignment objective only.
+                total_loss = ce_loss
 
                 losses.append(total_loss.detach().cpu().view(1))
 
@@ -505,6 +540,7 @@ class REFINE_PDB_SSL(REFINE_PDB):
             f"iteration every epoch: {len(train_dataset) // schedule['batch_size']}\n"
             f"Initial learning rate: {schedule['lr']}\n"
             f"SSL weight: {self.selfsup_weight}, PDB weight: {self.pdb_weight}, PDB batch_ratio: {self.pdb_batch_ratio}\n"
+            f"SSL warmup ratio: {self.ssl_warmup_ratio}, PDB warmup ratio: {self.pdb_warmup_ratio}, aux loss cap ratio: {self.aux_loss_cap_ratio}\n"
         )
         log(msg)
 
@@ -526,7 +562,11 @@ class REFINE_PDB_SSL(REFINE_PDB):
                 ce_loss = loss_func(logit, f_label)
                 loss_self = self._selfsup_contrastive_loss(batch_img)
                 loss_pdb = self._pdb_guidance_loss(self.X_adv, f_index)
-                total_loss = ce_loss + self.selfsup_weight * loss_self + self.pdb_weight * loss_pdb
+                ssl_weight_now = self._effective_aux_weight(self.selfsup_weight, i, schedule['epochs'], self.ssl_warmup_ratio)
+                pdb_weight_now = self._effective_aux_weight(self.pdb_weight, i, schedule['epochs'], self.pdb_warmup_ratio)
+                loss_self_capped = self._cap_aux_loss(loss_self, ce_loss)
+                loss_pdb_capped = self._cap_aux_loss(loss_pdb, ce_loss)
+                total_loss = ce_loss + ssl_weight_now * loss_self_capped + pdb_weight_now * loss_pdb_capped
 
                 optimizer.zero_grad()
                 total_loss.backward()
@@ -538,7 +578,9 @@ class REFINE_PDB_SSL(REFINE_PDB):
                     msg = (
                         time.strftime('[%Y-%m-%d_%H:%M:%S] ', time.localtime())
                         + f"Epoch:{i+1}/{schedule['epochs']}, iteration:{batch_id + 1}/{len(train_dataset)//schedule['batch_size']}, "
-                          f"lr: {schedule['lr']}, loss: {float(total_loss)}, ce: {float(ce_loss)}, ssl: {float(loss_self)}, pdb: {float(loss_pdb)}, time: {time.time()-last_time}\n"
+                                                    f"lr: {schedule['lr']}, loss: {float(total_loss)}, ce: {float(ce_loss)}, ssl: {float(loss_self)}, "
+                                                    f"ssl_capped: {float(loss_self_capped)}, ssl_w: {ssl_weight_now:.4f}, pdb: {float(loss_pdb)}, "
+                                                    f"pdb_capped: {float(loss_pdb_capped)}, pdb_w: {pdb_weight_now:.4f}, time: {time.time()-last_time}\n"
                     )
                     last_time = time.time()
                     log(msg)

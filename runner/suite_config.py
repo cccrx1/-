@@ -42,6 +42,9 @@ class RuntimeConfig:
     pdb_weight: float = 0.5
     pdb_batch_ratio: float = 0.5
     pdb_apply_inference_trigger: bool = True
+    pdb_warmup_ratio: float = 0.3
+    ssl_warmup_ratio: float = 0.3
+    aux_loss_cap_ratio: float = 1.5
     only_attack: str = "all"
     attack_cache_root: str = ""
     pretrained_benign_model_path: str = ""
@@ -99,6 +102,12 @@ def parse_suite_args() -> RuntimeConfig:
                         help="Per-batch sample ratio used for proactive defensive guidance")
     parser.add_argument("--no-pdb-inference-trigger", action="store_true", default=False,
                         help="Disable adding defensive trigger in forward/inference for PDB variants")
+    parser.add_argument("--pdb-warmup-ratio", type=float, default=0.3,
+                        help="Warmup ratio for PDB auxiliary loss weight (0 disables warmup)")
+    parser.add_argument("--ssl-warmup-ratio", type=float, default=0.3,
+                        help="Warmup ratio for SSL auxiliary loss weight (0 disables warmup)")
+    parser.add_argument("--aux-loss-cap-ratio", type=float, default=1.5,
+                        help="Upper bound for each auxiliary loss relative to CE loss (<=0 disables cap)")
     parser.add_argument("--only-attack", type=str, default="all",
                         choices=["all", "badnets", "blended", "label_consistent"],
                         help="Only run the specified attack + corresponding REFINE stage")
@@ -148,6 +157,9 @@ def parse_suite_args() -> RuntimeConfig:
         pdb_weight=args.pdb_weight,
         pdb_batch_ratio=args.pdb_batch_ratio,
         pdb_apply_inference_trigger=not args.no_pdb_inference_trigger,
+        pdb_warmup_ratio=args.pdb_warmup_ratio,
+        ssl_warmup_ratio=args.ssl_warmup_ratio,
+        aux_loss_cap_ratio=args.aux_loss_cap_ratio,
         only_attack=args.only_attack,
         attack_cache_root=args.attack_cache_root,
         pretrained_benign_model_path=args.pretrained_benign_model_path,
