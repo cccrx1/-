@@ -5,7 +5,7 @@
 ### 单条命令测试（推荐）
 
 ```bash
-python run.py --defense-variant refine_adaptive --only-attack badnets --refine-epochs 10 --seed 666
+python run.py single --defense-variant refine_adaptive --only-attack badnets --refine-epochs 10 --seed 666
 ```
 
 这条命令会：
@@ -19,8 +19,8 @@ python run.py --defense-variant refine_adaptive --only-attack badnets --refine-e
 #### 错误1: 找不到 run.py
 ```bash
 # 确保在项目根目录
-cd C:\Users\17672\Documents\Project\-
-python run.py --help
+cd C:\Users\17672\Documents\Projects\-
+python run.py single --help
 ```
 
 #### 错误2: 导入错误
@@ -37,7 +37,7 @@ python -c "import core; print(core.REFINE_ADAPTIVE)"
 #### 错误3: 参数错误
 ```bash
 # 查看所有可用参数
-python run.py --help | grep adaptive
+python run.py single --help | grep adaptive
 ```
 
 应该能看到：
@@ -56,7 +56,7 @@ python -c "from core.defenses import REFINE_ADAPTIVE; print('导入成功')"
 
 ### 步骤2: 运行最小实验（约5-10分钟）
 ```bash
-python run.py \
+python run.py single \
     --output-root ./experiments/test_adaptive \
     --defense-variant refine_adaptive \
     --only-attack badnets \
@@ -66,14 +66,14 @@ python run.py \
 
 ### 步骤3: 查看结果
 ```bash
-cat ./experiments/test_adaptive/*/metrics_summary.json
+cat ./experiments/test_adaptive/metrics_summary.json
 ```
 
 ## 对比实验（完整版）
 
 ### 实验1: Baseline
 ```bash
-python run.py \
+python run.py single \
     --output-root ./experiments/compare/baseline \
     --defense-variant refine \
     --only-attack badnets \
@@ -83,7 +83,7 @@ python run.py \
 
 ### 实验2: Adaptive
 ```bash
-python run.py \
+python run.py single \
     --output-root ./experiments/compare/adaptive \
     --defense-variant refine_adaptive \
     --adaptive-mode progressive \

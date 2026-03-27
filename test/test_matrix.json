@@ -51,6 +51,24 @@
       "refine_epochs": 50,
       "output_root": "./experiments/test/label_consistent_refine_ssl_50/runs",
       "adv_dataset_root": "./experiments/test/label_consistent_refine_ssl_50/adv_dataset"
+    },
+    "badnets_refine_adaptive": {
+      "only_attack": "badnets",
+      "defense_variant": "refine_adaptive",
+      "output_root": "./experiments/test/badnets_refine_adaptive/runs",
+      "adv_dataset_root": "./experiments/test/badnets_refine_adaptive/adv_dataset"
+    },
+    "blended_refine_adaptive": {
+      "only_attack": "blended",
+      "defense_variant": "refine_adaptive",
+      "output_root": "./experiments/test/blended_refine_adaptive/runs",
+      "adv_dataset_root": "./experiments/test/blended_refine_adaptive/adv_dataset"
+    },
+    "label_consistent_refine_adaptive": {
+      "only_attack": "label_consistent",
+      "defense_variant": "refine_adaptive",
+      "output_root": "./experiments/test/label_consistent_refine_adaptive/runs",
+      "adv_dataset_root": "./experiments/test/label_consistent_refine_adaptive/adv_dataset"
     }
   }
 }

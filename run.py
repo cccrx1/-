@@ -39,7 +39,7 @@ def _add_pipeline_args(parser: argparse.ArgumentParser, with_defaults: bool) -> 
     parser.add_argument("--refine-first-channels", type=int, default=default(64))
 
     # Method-specific defense parameters.
-    parser.add_argument("--defense-variant", type=str, choices=["refine", "refine_cg", "refine_ssl", "refine_pdb", "refine_pdb_ssl"], default=default("refine"))
+    parser.add_argument("--defense-variant", type=str, choices=["refine", "refine_cg", "refine_ssl", "refine_pdb", "refine_pdb_ssl", "refine_adaptive"], default=default("refine"))
     parser.add_argument("--cg-threshold", type=float, default=default(0.35))
     parser.add_argument("--cg-temperature", type=float, default=default(0.10))
     parser.add_argument("--cg-strength", type=float, default=default(1.0))
@@ -53,6 +53,11 @@ def _add_pipeline_args(parser: argparse.ArgumentParser, with_defaults: bool) -> 
     parser.add_argument("--pdb-warmup-ratio", type=float, default=default(0.3))
     parser.add_argument("--ssl-warmup-ratio", type=float, default=default(0.3))
     parser.add_argument("--aux-loss-cap-ratio", type=float, default=default(1.5))
+    parser.add_argument("--adaptive-mode", type=str, choices=["progressive", "statistical"], default=default("progressive"))
+    parser.add_argument("--adaptive-initial-threshold", type=float, default=default(1.5))
+    parser.add_argument("--adaptive-final-threshold", type=float, default=default(0.5))
+    parser.add_argument("--adaptive-warmup-ratio", type=float, default=default(0.3))
+
     parser.add_argument("--no-pdb-inference-trigger", action="store_true", default=default(False))
 
     parser.add_argument("--only-attack", type=str, choices=["all", "badnets", "blended", "label_consistent"], default=default("all"))
@@ -112,6 +117,10 @@ def _pipeline_args_to_cmd(args: argparse.Namespace, include_defaults: bool) -> L
         ("--pdb-warmup-ratio", "pdb_warmup_ratio"),
         ("--ssl-warmup-ratio", "ssl_warmup_ratio"),
         ("--aux-loss-cap-ratio", "aux_loss_cap_ratio"),
+        ("--adaptive-mode", "adaptive_mode"),
+        ("--adaptive-initial-threshold", "adaptive_initial_threshold"),
+        ("--adaptive-final-threshold", "adaptive_final_threshold"),
+        ("--adaptive-warmup-ratio", "adaptive_warmup_ratio"),
         ("--only-attack", "only_attack"),
         ("--attack-cache-root", "attack_cache_root"),
         ("--pretrained-benign-model-path", "pretrained_benign_model_path"),
