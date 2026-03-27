@@ -9,11 +9,12 @@ __all__ = [
     "REFINE_SSL",
     "REFINE_PDB",
     "REFINE_PDB_SSL",
+    "REFINE_ADAPTIVE",
     "models",
 ]
 
 _ATTACK_EXPORTS = {"BadNets", "Blended", "LabelConsistent"}
-_DEFENSE_EXPORTS = {"REFINE", "REFINE_CG", "REFINE_SSL", "REFINE_PDB", "REFINE_PDB_SSL"}
+_DEFENSE_EXPORTS = {"REFINE", "REFINE_CG", "REFINE_SSL", "REFINE_PDB", "REFINE_PDB_SSL", "REFINE_ADAPTIVE"}
 
 
 def __getattr__(name):

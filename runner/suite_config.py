@@ -45,6 +45,10 @@ class RuntimeConfig:
     pdb_warmup_ratio: float = 0.3
     ssl_warmup_ratio: float = 0.3
     aux_loss_cap_ratio: float = 1.5
+    adaptive_mode: str = "progressive"
+    adaptive_initial_threshold: float = 1.5
+    adaptive_final_threshold: float = 0.5
+    adaptive_warmup_ratio: float = 0.3
     only_attack: str = "all"
     attack_cache_root: str = ""
     pretrained_benign_model_path: str = ""
@@ -78,7 +82,8 @@ def parse_suite_args() -> RuntimeConfig:
     parser.add_argument("--refine-first-channels", type=int, default=64)
     parser.add_argument("--skip-lc", action="store_true",
                         help="Skip LabelConsistent attack and REFINE on LabelConsistent in this run")
-    parser.add_argument("--defense-variant", type=str, default="refine", choices=["refine", "refine_cg", "refine_ssl", "refine_pdb", "refine_pdb_ssl"],
+    parser.add_argument("--defense-variant", type=str, default="refine",
+                        choices=["refine", "refine_cg", "refine_ssl", "refine_pdb", "refine_pdb_ssl", "refine_adaptive"],
                         help="Defense backbone variant used in REFINE stage")
     parser.add_argument("--cg-threshold", type=float, default=0.35,
                         help="Suspicion threshold for REFINE_CG gate")
@@ -108,6 +113,14 @@ def parse_suite_args() -> RuntimeConfig:
                         help="Warmup ratio for SSL auxiliary loss weight (0 disables warmup)")
     parser.add_argument("--aux-loss-cap-ratio", type=float, default=1.5,
                         help="Upper bound for each auxiliary loss relative to CE loss (<=0 disables cap)")
+    parser.add_argument("--adaptive-mode", type=str, default="progressive", choices=["progressive", "statistical"],
+                        help="Adaptive threshold mode for REFINE_ADAPTIVE")
+    parser.add_argument("--adaptive-initial-threshold", type=float, default=1.5,
+                        help="Initial threshold multiplier for REFINE_ADAPTIVE")
+    parser.add_argument("--adaptive-final-threshold", type=float, default=0.5,
+                        help="Final threshold multiplier for REFINE_ADAPTIVE")
+    parser.add_argument("--adaptive-warmup-ratio", type=float, default=0.3,
+                        help="Warmup ratio for REFINE_ADAPTIVE threshold adjustment")
     parser.add_argument("--only-attack", type=str, default="all",
                         choices=["all", "badnets", "blended", "label_consistent"],
                         help="Only run the specified attack + corresponding REFINE stage")
@@ -160,6 +173,10 @@ def parse_suite_args() -> RuntimeConfig:
         pdb_warmup_ratio=args.pdb_warmup_ratio,
         ssl_warmup_ratio=args.ssl_warmup_ratio,
         aux_loss_cap_ratio=args.aux_loss_cap_ratio,
+        adaptive_mode=args.adaptive_mode,
+        adaptive_initial_threshold=args.adaptive_initial_threshold,
+        adaptive_final_threshold=args.adaptive_final_threshold,
+        adaptive_warmup_ratio=args.adaptive_warmup_ratio,
         only_attack=args.only_attack,
         attack_cache_root=args.attack_cache_root,
         pretrained_benign_model_path=args.pretrained_benign_model_path,

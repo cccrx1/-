@@ -494,6 +494,14 @@ def run_refine_for_attack(
             temperature=cfg.ssl_temperature,
             selfsup_weight=cfg.ssl_weight,
         )
+    elif cfg.defense_variant == "refine_adaptive":
+        defense = core.REFINE_ADAPTIVE(
+            **defense_kwargs,
+            adaptive_mode=cfg.adaptive_mode,
+            initial_threshold=cfg.adaptive_initial_threshold,
+            final_threshold=cfg.adaptive_final_threshold,
+            warmup_ratio=cfg.adaptive_warmup_ratio,
+        )
     else:
         defense = core.REFINE(**defense_kwargs)
 
