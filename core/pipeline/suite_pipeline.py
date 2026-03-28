@@ -27,8 +27,8 @@ from torchvision.transforms import Compose, ConvertImageDtype, PILToTensor, Rand
 
 import core
 from core.attacks.base import accuracy as attack_accuracy
-from runner.pipeline_state import PipelineRunLock, StageLogger, StageStatusManager
-from runner.suite_config import RuntimeConfig, parse_suite_args
+from core.pipeline.pipeline_state import PipelineRunLock, StageLogger, StageStatusManager
+from core.pipeline.suite_config import RuntimeConfig, parse_suite_args
 
 
 def build_tensor_transform() -> Compose:
