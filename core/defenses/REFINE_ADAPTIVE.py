@@ -146,6 +146,7 @@ class REFINE_ADAPTIVE(REFINE):
         best_eval_loss = float("inf")
         best_epoch = 0
         best_unet_state = None
+        current_threshold = None
 
         msg = f"Total train samples: {len(train_dataset)}\nTotal test samples: {len(test_dataset)}\n"
         msg += f"Batch size: {schedule['batch_size']}\nInitial learning rate: {schedule['lr']}\n"
@@ -160,6 +161,12 @@ class REFINE_ADAPTIVE(REFINE):
                     param_group['lr'] = schedule['lr']
 
             epoch_losses = []
+            epoch_selected = 0
+            epoch_total = 0
+            epoch_fallback_batches = 0
+            invalid_threshold_epochs = 0
+            epoch_threshold_used = current_threshold
+            threshold_is_valid = epoch_threshold_used is not None and np.isfinite(epoch_threshold_used)
             for batch_id, batch in enumerate(train_loader):
                 batch_img, _ = batch
                 batch_img = batch_img.to(device)
@@ -171,26 +178,49 @@ class REFINE_ADAPTIVE(REFINE):
 
                 logit = self.forward(batch_img)
 
-                features = self.X_adv.view(bsz, -1)
+                loss_per_sample = loss_func(logit, f_label).mean(dim=1)
+                if epoch_threshold_used is None:
+                    selected_mask = torch.ones_like(loss_per_sample, dtype=torch.bool)
+                    fallback_triggered = False
+                elif not threshold_is_valid:
+                    selected_mask = torch.ones_like(loss_per_sample, dtype=torch.bool)
+                    fallback_triggered = True
+                else:
+                    selected_mask = loss_per_sample <= epoch_threshold_used
+                    fallback_triggered = not bool(selected_mask.any().item())
+                    if fallback_triggered:
+                        selected_mask = torch.ones_like(loss_per_sample, dtype=torch.bool)
+
+                selected_count = int(selected_mask.sum().item())
+                selected_index = f_index[selected_mask]
+                selected_label = f_label[selected_mask]
+                selected_logit = logit[selected_mask]
+                selected_bsz = selected_logit.shape[0]
+
+                features = self.X_adv[selected_mask].view(selected_bsz, -1)
                 features = F.normalize(features, dim=1)
                 f1, f2 = features, features
                 features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
-                supconloss = supconloss_func(features, f_index)
+                supconloss = supconloss_func(features, selected_index)
 
-                loss_per_sample = loss_func(logit, f_label).mean(dim=1)
-                loss = loss_per_sample.mean() + self.lmd * supconloss
+                ce_loss = loss_func(selected_logit, selected_label).mean()
+                loss = ce_loss + self.lmd * supconloss
 
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
 
                 epoch_losses.append(loss_per_sample.detach().cpu())
+                epoch_selected += selected_count
+                epoch_total += loss_per_sample.numel()
+                if fallback_triggered:
+                    epoch_fallback_batches += 1
                 iteration += 1
 
                 if iteration % schedule['log_iteration_interval'] == 0:
                     msg = time.strftime("[%Y-%m-%d_%H:%M:%S] ", time.localtime())
                     msg += f"Epoch:{i+1}/{schedule['epochs']}, iteration:{batch_id + 1}/{len(train_loader)}, "
-                    msg += f"lr: {schedule['lr']}, loss: {float(loss):.6f}, time: {time.time()-last_time:.2f}\n"
+                    msg += f"lr: {schedule['lr']}, loss: {float(loss):.6f}, selected: {selected_count}/{loss_per_sample.numel()}, fallback: {int(fallback_triggered)}, time: {time.time()-last_time:.2f}\n"
                     last_time = time.time()
                     log(msg)
 
@@ -199,8 +229,25 @@ class REFINE_ADAPTIVE(REFINE):
             threshold, mean_loss, std_loss = self.compute_adaptive_threshold(
                 epoch_losses_tensor, i + 1, schedule['epochs']
             )
-            msg = f"[Adaptive Threshold] Epoch {i+1}: mean_loss={mean_loss:.6f}, std_loss={std_loss:.6f}, threshold={threshold:.6f}\n"
+            if not np.isfinite(mean_loss):
+                mean_loss = float(epoch_losses_tensor.mean().item())
+            if not np.isfinite(std_loss):
+                std_loss = 0.0
+            if not np.isfinite(threshold):
+                threshold = mean_loss
+                invalid_threshold_epochs = 1
+            if not np.isfinite(threshold):
+                threshold = 0.0
+            keep_ratio = (epoch_selected / epoch_total) if epoch_total > 0 else 0.0
+            if epoch_threshold_used is None:
+                threshold_used_msg = "vanilla_all_samples"
+            elif threshold_is_valid:
+                threshold_used_msg = f"{epoch_threshold_used:.6f}"
+            else:
+                threshold_used_msg = "invalid_threshold_all_samples"
+            msg = f"[Adaptive Threshold] Epoch {i+1}: used_threshold={threshold_used_msg}, mean_loss={mean_loss:.6f}, std_loss={std_loss:.6f}, next_threshold={threshold:.6f}, keep_ratio={keep_ratio:.4f}, fallback_batches={epoch_fallback_batches}, invalid_threshold_epochs={invalid_threshold_epochs}\n"
             log(msg)
+            current_threshold = threshold
 
             if (i + 1) % schedule['test_epoch_interval'] == 0:
                 loss = self._test(test_dataset, device, schedule['batch_size'], schedule['num_workers'])
