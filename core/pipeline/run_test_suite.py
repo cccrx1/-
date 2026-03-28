@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument("--continue-on-error", action="store_true", help="Continue running remaining cases if one fails.")
     parser.add_argument("--list-cases", action="store_true", help="List all available cases and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Print commands only, do not execute.")
-    parser.add_argument("--summary-dir", type=str, default="./experiments/test/summary", help="Directory to store aggregated summaries.")
+    parser.add_argument("--summary-dir", type=str, default="./experiments/suite/summary", help="Directory to store aggregated summaries.")
     args, passthrough = parser.parse_known_args()
     if passthrough and passthrough[0] == "--":
         passthrough = passthrough[1:]
@@ -113,6 +113,8 @@ def main():
             case,
             "--matrix",
             str(Path(args.matrix).as_posix()),
+            "--run-group",
+            "suite",
         ]
         if args.dry_run:
             cmd.append("--dry-run")
@@ -129,7 +131,9 @@ def main():
         status = "ok" if result.returncode == 0 else "failed"
         metrics = {}
         if status == "ok" and not args.dry_run:
-            metrics = collect_case_metrics(root, matrix_cases[case])
+            effective_case_cfg = dict(matrix_cases[case])
+            effective_case_cfg["output_root"] = f"./experiments/suite/{case}/runs"
+            metrics = collect_case_metrics(root, effective_case_cfg)
 
         run_report["results"].append(
             {

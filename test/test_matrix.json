@@ -10,65 +10,65 @@
     "benign_epochs": 200,
     "attack_epochs": 200,
     "lc_epochs": 200,
-    "attack_cache_root": "./experiments/test/shared_attack_cache"
+    "attack_cache_root": "./experiments/case/shared_attack_cache"
   },
   "cases": {
     "badnets_refine": {
       "only_attack": "badnets",
       "defense_variant": "refine",
-      "output_root": "./experiments/test/badnets_refine/runs",
-      "adv_dataset_root": "./experiments/test/badnets_refine/adv_dataset"
+      "output_root": "./experiments/case/badnets_refine/runs",
+      "adv_dataset_root": "./experiments/case/badnets_refine/adv_dataset"
     },
     "blended_refine": {
       "only_attack": "blended",
       "defense_variant": "refine",
-      "output_root": "./experiments/test/blended_refine/runs",
-      "adv_dataset_root": "./experiments/test/blended_refine/adv_dataset"
+      "output_root": "./experiments/case/blended_refine/runs",
+      "adv_dataset_root": "./experiments/case/blended_refine/adv_dataset"
     },
     "label_consistent_refine": {
       "only_attack": "label_consistent",
       "defense_variant": "refine",
-      "output_root": "./experiments/test/label_consistent_refine/runs",
-      "adv_dataset_root": "./experiments/test/label_consistent_refine/adv_dataset"
+      "output_root": "./experiments/case/label_consistent_refine/runs",
+      "adv_dataset_root": "./experiments/case/label_consistent_refine/adv_dataset"
     },
     "badnets_refine_ssl_50": {
       "only_attack": "badnets",
       "defense_variant": "refine_ssl",
       "refine_epochs": 50,
-      "output_root": "./experiments/test/badnets_refine_ssl_50/runs",
-      "adv_dataset_root": "./experiments/test/badnets_refine_ssl_50/adv_dataset"
+      "output_root": "./experiments/case/badnets_refine_ssl_50/runs",
+      "adv_dataset_root": "./experiments/case/badnets_refine_ssl_50/adv_dataset"
     },
     "blended_refine_ssl_50": {
       "only_attack": "blended",
       "defense_variant": "refine_ssl",
       "refine_epochs": 50,
-      "output_root": "./experiments/test/blended_refine_ssl_50/runs",
-      "adv_dataset_root": "./experiments/test/blended_refine_ssl_50/adv_dataset"
+      "output_root": "./experiments/case/blended_refine_ssl_50/runs",
+      "adv_dataset_root": "./experiments/case/blended_refine_ssl_50/adv_dataset"
     },
     "label_consistent_refine_ssl_50": {
       "only_attack": "label_consistent",
       "defense_variant": "refine_ssl",
       "refine_epochs": 50,
-      "output_root": "./experiments/test/label_consistent_refine_ssl_50/runs",
-      "adv_dataset_root": "./experiments/test/label_consistent_refine_ssl_50/adv_dataset"
+      "output_root": "./experiments/case/label_consistent_refine_ssl_50/runs",
+      "adv_dataset_root": "./experiments/case/label_consistent_refine_ssl_50/adv_dataset"
     },
     "badnets_refine_adaptive": {
       "only_attack": "badnets",
       "defense_variant": "refine_adaptive",
-      "output_root": "./experiments/test/badnets_refine_adaptive/runs",
-      "adv_dataset_root": "./experiments/test/badnets_refine_adaptive/adv_dataset"
+      "output_root": "./experiments/case/badnets_refine_adaptive/runs",
+      "adv_dataset_root": "./experiments/case/badnets_refine_adaptive/adv_dataset"
     },
     "blended_refine_adaptive": {
       "only_attack": "blended",
       "defense_variant": "refine_adaptive",
-      "output_root": "./experiments/test/blended_refine_adaptive/runs",
-      "adv_dataset_root": "./experiments/test/blended_refine_adaptive/adv_dataset"
+      "output_root": "./experiments/case/blended_refine_adaptive/runs",
+      "adv_dataset_root": "./experiments/case/blended_refine_adaptive/adv_dataset"
     },
     "label_consistent_refine_adaptive": {
       "only_attack": "label_consistent",
       "defense_variant": "refine_adaptive",
-      "output_root": "./experiments/test/label_consistent_refine_adaptive/runs",
-      "adv_dataset_root": "./experiments/test/label_consistent_refine_adaptive/adv_dataset"
+      "output_root": "./experiments/case/label_consistent_refine_adaptive/runs",
+      "adv_dataset_root": "./experiments/case/label_consistent_refine_adaptive/adv_dataset"
     }
   }
 }

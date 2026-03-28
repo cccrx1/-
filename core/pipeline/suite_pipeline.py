@@ -883,7 +883,7 @@ def build_comparison_markdown(all_metrics: Dict[str, object]) -> str:
 
 
 def parse_args() -> RuntimeConfig:
-    """Backward-compatible wrapper around centralized suite config parser."""
+    """Thin wrapper around centralized suite config parser."""
     return parse_suite_args()
 
 

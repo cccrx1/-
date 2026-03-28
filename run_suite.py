@@ -2,7 +2,7 @@
 
 Design goals:
 1) Keep one top-level command for all run modes.
-2) Keep experiment orchestration scripts inside test/.
+2) Keep experiment orchestration logic centralized in core/pipeline.
 3) Centralize common and method-specific runtime arguments.
 """
 
@@ -150,6 +150,11 @@ def parse_args() -> argparse.Namespace:
 
     single = sub.add_parser("single", help="Run one direct pipeline job with explicit parameters.")
     _add_pipeline_args(single, with_defaults=True)
+    single.set_defaults(
+        output_root="./experiments/single/runs",
+        adv_dataset_root="./experiments/single/adv_dataset",
+        attack_cache_root="./experiments/single/shared_attack_cache",
+    )
 
     smoke = sub.add_parser("smoke", help="Run a quick 1-epoch pipeline smoke check.")
     smoke.add_argument("--dry-run", action="store_true", default=False)
@@ -166,6 +171,7 @@ def parse_args() -> argparse.Namespace:
         device_mode="CPU",
         output_root="./experiments/smoke/runs",
         adv_dataset_root="./experiments/smoke/adv_dataset",
+        attack_cache_root="./experiments/smoke/shared_attack_cache",
         force_rebuild=True,
     )
 
@@ -181,7 +187,7 @@ def parse_args() -> argparse.Namespace:
     suite.add_argument("--continue-on-error", action="store_true", default=False)
     suite.add_argument("--list-cases", action="store_true", default=False)
     suite.add_argument("--dry-run", action="store_true", default=False)
-    suite.add_argument("--summary-dir", type=str, default="./experiments/test/summary")
+    suite.add_argument("--summary-dir", type=str, default="./experiments/suite/summary")
     _add_pipeline_args(suite, with_defaults=False)
 
     return parser.parse_args()
@@ -205,6 +211,8 @@ def main() -> None:
             args.case,
             "--matrix",
             args.matrix,
+            "--run-group",
+            "case",
         ]
         if args.dry_run:
             cmd.append("--dry-run")
