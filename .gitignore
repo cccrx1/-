@@ -1,24 +1,55 @@
-# Ignore local datasets and archives
+# =========================
+# Python caches and builds
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Generic cache folders
+.cache/
+cache/
+
+# =========================
+# Virtual environments
+# =========================
+.venv/
+venv/
+env/
+ENV/
+.conda/
+conda-meta/
+
+# =========================
+# IDE/editor settings
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# Local data and artifacts
+# =========================
 /datasets/**
 !/datasets/.gitkeep
 
 /experiments/**
 !/experiments/.gitkeep
 
-# Ignore Python/runtime caches
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
+# Optional local archives
+*.zip
+*.tar
+*.tar.gz
+*.7z
 
-# Ignore local cache directories
-.cache/
-
-.vscode/
-.conda/**
-
-/Proactive_Defensive_Backdoor-main/**
-
+# =========================
+# Project-local temporary files
+# =========================
 /report.txt
-experiments/test/summary/suite_summary_20260322_202840.json
-experiments/test/summary/suite_summary_20260322_202840.json
+
+# Keep this if that local external copy may exist
+/Proactive_Defensive_Backdoor-main/**
