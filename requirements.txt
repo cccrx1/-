@@ -1,19 +1,16 @@
-# Exact pinned versions for reproducible environments
-# Use this file for both Windows and Linux: pip install -r requirements-lock.txt
-# Python-version aware lock to avoid torch/torchvision conflicts.
-# Supported Python range for this project: 3.10 - 3.13.
+# Minimal runtime dependencies for this project.
+# Install with: pip install -r requirements.txt
+#
+# GPU-first PyTorch wheels (CUDA 12.4). If CUDA is not available,
+# pip may resolve CPU wheels from the default index.
+--extra-index-url https://download.pytorch.org/whl/cu124
 
-# Core runtime
-numpy==1.26.4
-Pillow==10.1.0
-opencv-python==4.8.1.78
-tqdm==4.66.1
+# Core numerical / vision stack
+numpy>=1.26,<3
+Pillow>=10,<12
+opencv-python>=4.10,<5
+tqdm>=4.66,<5
 
-# Deep learning stack
-# Python 3.10/3.11
-torch==2.2.0; python_version < "3.12"
-torchvision==0.17.0; python_version < "3.12"
-
-# Python 3.12/3.13
-torch==2.5.1; python_version >= "3.12" and python_version < "3.14"
-torchvision==0.20.1; python_version >= "3.12" and python_version < "3.14"
+# Deep learning stack (keep torch/torchvision major-minor compatible)
+torch>=2.5,<2.7
+torchvision>=0.20,<0.22
