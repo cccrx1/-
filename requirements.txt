@@ -1,17 +1,14 @@
-# Minimal runtime dependencies for this project.
-# Install with: pip install -r requirements.txt
+# Minimal dependencies for CIFAR-10 backdoor defense experiments
+# Python: 3.10 - 3.13
+# Platform: Windows, Linux
 #
-# GPU-first PyTorch wheels (CUDA 12.4). If CUDA is not available,
-# pip may resolve CPU wheels from the default index.
---extra-index-url https://download.pytorch.org/whl/cu124
+# Install:
+#   pip install -r requirements.txt
+#
+# Then install PyTorch with your CUDA version:
+#   CUDA 11.8: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#   CUDA 12.1: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   CPU only:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Core numerical / vision stack
-# Keep NumPy < 2 for broad binary compatibility with current PyTorch ecosystem.
 numpy>=1.26,<2
 Pillow>=10,<12
-opencv-python>=4.10,<5
-tqdm>=4.66,<5
-
-# Deep learning stack (keep torch/torchvision major-minor compatible)
-torch>=2.5,<2.7
-torchvision>=0.20,<0.22
