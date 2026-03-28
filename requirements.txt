@@ -6,7 +6,8 @@
 --extra-index-url https://download.pytorch.org/whl/cu124
 
 # Core numerical / vision stack
-numpy>=1.26,<3
+# Keep NumPy < 2 for broad binary compatibility with current PyTorch ecosystem.
+numpy>=1.26,<2
 Pillow>=10,<12
 opencv-python>=4.10,<5
 tqdm>=4.66,<5
